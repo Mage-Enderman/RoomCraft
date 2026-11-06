@@ -64,7 +64,9 @@
       if (!b || !isFinite(b.w)) return;
       const sidebar = this.app.ui && this.app.ui.sidebarOpen !== false ? 330 : 0;
       const padX = 120;
-      const padTop = 148;
+      // Below 1180px the stepper drops to a second row, so keep the top
+      // dimension line clear of it.
+      const padTop = window.innerWidth <= 1180 ? 196 : 148;
       const padBottom = 118;
       const availW = Math.max(160, this.W - sidebar - padX * 2);
       const availH = Math.max(160, this.H - padTop - padBottom);
@@ -256,7 +258,14 @@
           this.draw();
         }
       });
-      window.addEventListener('resize', () => this.resize());
+      window.addEventListener('resize', () => {
+        this.resize();
+        clearTimeout(this._fitTimer);
+        this._fitTimer = setTimeout(() => {
+          if (this.app.ui && this.app.ui.view3d) return;
+          if (this.app.plan && this.app.plan.outline && this.app.plan.outline.length >= 3) this.fit();
+        }, 140);
+      });
       window.addEventListener('keydown', (e) => this.onKeyDown(e));
       window.addEventListener('keyup', (e) => {
         if (e.code === 'Space') this.spaceDown = false;

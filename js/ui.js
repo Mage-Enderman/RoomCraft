@@ -358,9 +358,9 @@
           ${this.stat('doors', String(stats.doors), '', 'Doors')}
           ${this.stat('furnished', furnished ? 'Yes' : '—', '', furnished ? 'Furnished' : 'Not furnished')}
         </div>
-        <div class="tips">
+        ${is3d ? '' : `<div class="tips">
           ${this.tipsHTML(step, is3d)}
-        </div>
+        </div>`}
 
         ${selectionHTML}
 
@@ -1080,7 +1080,8 @@
           <div class="help-item"><span class="key">2</span><div><b>Add inner walls</b><p>Keep clicking to chain partitions. Walls snap to corners and to each other.</p></div></div>
           <div class="help-item"><span class="key">3</span><div><b>Type the rooms</b><p>Rooms are found automatically. Click one to pick a type — that selects its furniture.</p></div></div>
           <div class="help-item"><span class="key">4</span><div><b>Drop openings</b><p>Place doors and windows on walls. Drag them to move; edit width, height and sill in the panel.</p></div></div>
-          <div class="help-item"><span class="key">5</span><div><b>Go 3D</b><p>Make it 3D to see real wall heights, cut openings and furnished rooms.</p></div></div>
+          <div class="help-item"><span class="key">5</span><div><b>Generate the interior</b><p>Pick a style and furnishing level, then let Floorcraft furnish each room by type.</p></div></div>
+          <div class="help-item"><span class="key">6</span><div><b>Make it 3D</b><p>Explore real wall heights and cut openings, relight the scene with the time-of-day slider, and save an image.</p></div></div>
         </div>
         <div class="shortcut-head">Keyboard</div>
         <div class="shortcut-grid">

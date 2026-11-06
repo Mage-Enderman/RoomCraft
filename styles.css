@@ -1732,7 +1732,7 @@ body.sidebar-closed .welcome {
 .welcome-steps {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   margin-top: 24px;
   padding-top: 15px;
   border-top: 1px solid rgba(25, 26, 32, 0.06);
@@ -1741,9 +1741,9 @@ body.sidebar-closed .welcome {
 .welcome-steps span {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   color: #9a9ba3;
-  font-size: 8.7px;
+  font-size: 8.5px;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -1761,7 +1761,7 @@ body.sidebar-closed .welcome {
 }
 
 .welcome-steps i {
-  width: 10px;
+  width: 7px;
   height: 1px;
   background: rgba(25, 26, 32, 0.11);
 }

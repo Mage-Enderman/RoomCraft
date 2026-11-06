@@ -1030,9 +1030,54 @@
 
     exportPNG() {
       if (!this.editor) return;
-      this.editor.draw();
+      const editor = this.editor;
+      const view = { scale: editor.view.scale, cx: editor.view.cx, cy: editor.view.cy };
+      const hover = editor.hover;
+      const hoverOpeningWall = editor.hoverOpeningWall;
+      let data;
       try {
-        const data = this.editor.canvas.toDataURL('image/png');
+        // Frame the whole plan, then crop the canvas to the drawing so the
+        // exported image is centred instead of inheriting the sidebar offset.
+        editor.hover = null;
+        editor.hoverOpeningWall = null;
+        editor.fit();
+        const canvas = editor.canvas;
+        const b = FC.planBounds(this.plan);
+        if (!b) throw new Error('No plan bounds');
+        const a = editor.w2s({ x: b.x0, y: b.y0 });
+        const c = editor.w2s({ x: b.x1, y: b.y1 });
+        const margin = 92; // dimension lines + breathing room
+        const dprX = canvas.width / editor.W;
+        const dprY = canvas.height / editor.H;
+        const x0 = Math.max(0, Math.floor((Math.min(a.x, c.x) - margin) * dprX));
+        const y0 = Math.max(0, Math.floor((Math.min(a.y, c.y) - margin) * dprY));
+        const x1 = Math.min(canvas.width, Math.ceil((Math.max(a.x, c.x) + margin) * dprX));
+        const y1 = Math.min(canvas.height, Math.ceil((Math.max(a.y, c.y) + margin) * dprY));
+        const w = Math.max(80, x1 - x0);
+        const h = Math.max(80, y1 - y0);
+        const out = document.createElement('canvas');
+        out.width = w;
+        out.height = h;
+        const ctx = out.getContext('2d');
+        ctx.drawImage(canvas, x0, y0, w, h, 0, 0, w, h);
+        data = out.toDataURL('image/png');
+      } catch (err) {
+        try {
+          data = editor.canvas.toDataURL('image/png');
+        } catch (e) {
+          data = null;
+        }
+      } finally {
+        editor.view.scale = view.scale;
+        editor.view.cx = view.cx;
+        editor.view.cy = view.cy;
+        editor.hover = hover;
+        editor.hoverOpeningWall = hoverOpeningWall;
+        editor.updateZoomLabel();
+        editor.draw();
+      }
+      try {
+        if (!data) throw new Error('No render');
         downloadDataURL(data, safeName(this.plan.name) + '.png');
         this.toast('Plan image saved', 'success');
       } catch (err) {

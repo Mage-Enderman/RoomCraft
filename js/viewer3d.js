@@ -311,7 +311,13 @@
     buildWalls(plan, segs, style, H) {
       const wallMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(style.wall), roughness: 0.95, metalness: 0 });
       const wallOutMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(style.wallOutside), roughness: 0.95, metalness: 0 });
-      this.wallMats = [wallMat, wallOutMat];
+      // Darker section caps make the cutaway read like an architectural model.
+      const capMat = new THREE.MeshStandardMaterial({
+        color: blend(style.wallOutside, '#4a443a', 0.82),
+        roughness: 0.9,
+        metalness: 0,
+      });
+      this.wallMats = [wallMat, wallOutMat, capMat];
 
       segs.forEach((seg) => {
         if (seg.len < 0.1) return;
@@ -359,7 +365,7 @@
 
         const geo = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: false, curveSegments: 1 });
         geo.translate(0, 0, -t / 2);
-        const mesh = new THREE.Mesh(geo, seg.boundary ? wallOutMat : wallMat);
+        const mesh = new THREE.Mesh(geo, [seg.boundary ? wallOutMat : wallMat, capMat]);
         mesh.position.set((seg.a.x + seg.b.x) / 2, 0, (seg.a.y + seg.b.y) / 2);
         mesh.rotation.y = -seg.angle;
         mesh.castShadow = true;
