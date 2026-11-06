@@ -494,7 +494,7 @@
                 ${['single', 'double', 'sliding'].map((s) => `<button class="chip ${op.style === s ? 'active' : ''}" data-action="door-style" data-style="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
               </div>`
             : ''}
-          <div class="sel-help">${op.kind === 'window' ? `Sill ${op.sill.toFixed(2)} m · head <b data-op-head>${(op.sill + op.height).toFixed(2)}</b> m — both must stay below the ${this.app.plan.settings.wallHeight.toFixed(2)} m wall.` : 'Drag the opening along the wall to reposition it.'}</div>
+          <div class="sel-help">${op.kind === 'window' ? `Sill <b data-op-sill>${op.sill.toFixed(2)}</b> m · head <b data-op-head>${(op.sill + op.height).toFixed(2)}</b> m — both must stay below the <b data-op-wall>${this.app.plan.settings.wallHeight.toFixed(2)}</b> m wall.` : 'Drag the opening along the wall to reposition it.'}</div>
           <button class="danger-link" data-action="delete-selection">${I('trash')} Delete ${label.toLowerCase()}</button>
         </div>`;
       }
@@ -788,10 +788,12 @@
       const s = this.app.plan.settings;
       document.querySelectorAll('[data-window-sill]').forEach((n) => (n.textContent = s.windowSill.toFixed(2)));
       document.querySelectorAll('[data-window-head]').forEach((n) => (n.textContent = (s.windowSill + s.windowHeight).toFixed(2)));
+      document.querySelectorAll('[data-op-wall]').forEach((n) => (n.textContent = s.wallHeight.toFixed(2)));
       const sel = this.app.ui.selection;
       if (sel && sel.type === 'opening') {
         const op = this.app.plan.openings.find((o) => o.id === sel.id);
         if (op && op.kind === 'window') {
+          document.querySelectorAll('[data-op-sill]').forEach((n) => (n.textContent = op.sill.toFixed(2)));
           document.querySelectorAll('[data-op-head]').forEach((n) => (n.textContent = (op.sill + op.height).toFixed(2)));
         }
       }
