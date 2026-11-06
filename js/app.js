@@ -89,7 +89,7 @@
         ortho: false,
         drawingFresh: false,
         selection: null,
-        sidebarOpen: true,
+        sidebarOpen: window.innerWidth > 700,
       };
 
       this._loadProjects();

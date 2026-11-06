@@ -63,11 +63,12 @@
       const b = FC.planBounds(this.app.plan);
       if (!b || !isFinite(b.w)) return;
       const sidebar = this.app.ui && this.app.ui.sidebarOpen !== false ? 330 : 0;
-      const padX = 120;
+      const compact = window.innerWidth <= 900;
+      const padX = compact ? 48 : 120;
       // Below 1180px the stepper drops to a second row, so keep the top
       // dimension line clear of it.
       const padTop = window.innerWidth <= 1180 ? 196 : 148;
-      const padBottom = 118;
+      const padBottom = compact ? 96 : 118;
       const availW = Math.max(160, this.W - sidebar - padX * 2);
       const availH = Math.max(160, this.H - padTop - padBottom);
       const bw = Math.max(b.w, 2);

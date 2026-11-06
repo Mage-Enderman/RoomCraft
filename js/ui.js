@@ -237,7 +237,10 @@
     setSidebarOpen(open) {
       this.sidebarOpen = !!open;
       this.syncSidebar();
-      if (this.app.editor && !this.app.ui.view3d) this.app.editor.draw();
+      if (this.app.editor && !this.app.ui.view3d) {
+        if (this.app.plan.outline && this.app.plan.outline.length >= 3) this.app.editor.fit();
+        else this.app.editor.draw();
+      }
     }
 
     openRoomSelection(roomId) {
