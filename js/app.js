@@ -496,6 +496,14 @@
     deleteSelection() {
       const sel = this.ui.selection;
       if (!sel) return;
+      if (sel.type === 'furniture') {
+        this.deleteSelectedFurniture();
+        return;
+      }
+      if (sel.type === 'light') {
+        this.deleteSelectedLight();
+        return;
+      }
       if (sel.type === 'room') {
         this.toast('Rooms are detected automatically — change its type instead.', 'info');
         return;
@@ -751,13 +759,170 @@
       }
       this.pushHistory();
       this.plan.furnished = true;
+      this.plan.layoutVariation = (this.plan.layoutVariation || 0) + 1;
       this.recomputeFurniture();
       this.ui.step = 5;
       this.changed({ furniture: false, save: true });
       if (this.ui) this.ui.renderAll();
       if (this.viewer) this.viewer.markDirty();
       const count = FC.furnitureCount(this.furniture);
-      this.toast(count + ' pieces placed across ' + this.rooms.length + ' rooms.', 'success');
+      this.toast(`Interior variation #${this.plan.layoutVariation} generated! (${count} pieces across ${this.rooms.length} rooms)`, 'success');
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Interactive edits: walls, doors, furniture, lights               */
+    /* ---------------------------------------------------------------- */
+
+    resizeWall(wallId, newLen, fromEnd = 0) {
+      this.pushHistory();
+      const ok = FC.resizeWall(this.plan, wallId, newLen, fromEnd);
+      if (ok) {
+        this.changed({ rooms: true, furniture: true, save: true });
+        this.toast('Wall resized to ' + FC.fmt(newLen, 2) + ' m', 'success');
+      }
+    }
+
+    splitWallAt(wallId, pt) {
+      this.pushHistory();
+      const newW = FC.splitWall(this.plan, wallId, pt);
+      if (newW) {
+        this.changed({ rooms: true, furniture: true, save: true });
+        this.toast('Wall split', 'success');
+      }
+    }
+
+    flipDoor() {
+      const sel = this.ui.selection;
+      if (!sel || sel.type !== 'opening') return;
+      const op = this.plan.openings.find((o) => o.id === sel.id);
+      if (!op) return;
+      this.pushHistory();
+      if (op.kind === 'door') {
+        const styles = ['single', 'double', 'sliding'];
+        const nextIdx = (styles.indexOf(op.style || 'single') + 1) % styles.length;
+        op.style = styles[nextIdx];
+      }
+      this.changed({ furniture: false, save: true });
+      this.toast('Door updated (' + op.style + ')', 'info');
+    }
+
+    placeDoorAt(hostKey, offset) {
+      const def = FC.defaultOpening(this.plan, 'door', hostKey, offset);
+      this.pushHistory();
+      this.plan.openings.push(def);
+      this.select({ type: 'opening', id: def.id });
+      this.changed({ rooms: false, furniture: true, save: true });
+      this.toast('Door placed', 'success');
+    }
+
+    placeWindowAt(hostKey, offset) {
+      const def = FC.defaultOpening(this.plan, 'window', hostKey, offset);
+      this.pushHistory();
+      this.plan.openings.push(def);
+      this.select({ type: 'opening', id: def.id });
+      this.changed({ rooms: false, furniture: true, save: true });
+      this.toast('Window placed', 'success');
+    }
+
+    placeOpeningAt(hostKey, offset) {
+      const def = FC.defaultOpening(this.plan, 'opening', hostKey, offset);
+      this.pushHistory();
+      this.plan.openings.push(def);
+      this.select({ type: 'opening', id: def.id });
+      this.changed({ rooms: false, furniture: true, save: true });
+      this.toast('Passage placed', 'success');
+    }
+
+    rotateSelectedFurniture(delta) {
+      const sel = this.ui.selection;
+      if (!sel || sel.type !== 'furniture' || !this.furniture) return;
+      const f = this.furniture.find((item) => item.id === sel.id);
+      if (!f) return;
+      this.pushHistory();
+      f.rot = FC.round((f.rot || 0) + (delta || Math.PI / 2), 3);
+      this.changed({ rooms: false, furniture: false, save: true });
+      if (this.viewer) this.viewer.markDirty();
+      this.toast('Rotated ' + f.kind, 'info');
+    }
+
+    deleteSelectedFurniture() {
+      const sel = this.ui.selection;
+      if (!sel || sel.type !== 'furniture' || !this.furniture) return;
+      this.pushHistory();
+      this.furniture = this.furniture.filter((item) => item.id !== sel.id);
+      this.clearSelection();
+      this.changed({ rooms: false, furniture: false, save: true });
+      if (this.viewer) this.viewer.markDirty();
+      this.toast('Furniture removed', 'info');
+    }
+
+    addFurnitureItem(kind) {
+      if (!this.rooms.length) {
+        this.toast('Create enclosed rooms first', 'info');
+        return;
+      }
+      this.pushHistory();
+      const r = this.rooms[0];
+      const b = r.bounds || FC.polygonBounds(r.polygon);
+      const item = {
+        id: FC.uid('f'),
+        roomId: r.id,
+        kind,
+        x: FC.round(b.cx, 3),
+        y: FC.round(b.cy, 3),
+        w: kind === 'bed' ? 1.6 : kind === 'sofa' ? 2.1 : 1.0,
+        d: kind === 'bed' ? 2.0 : kind === 'sofa' ? 0.9 : 0.8,
+        rot: 0,
+        h: 0.75,
+        elev: 0,
+        mat: 'wood',
+        variant: '',
+        decor: false,
+      };
+      if (!this.furniture) this.furniture = [];
+      this.furniture.push(item);
+      this.plan.furnished = true;
+      this.select({ type: 'furniture', id: item.id });
+      this.changed({ rooms: false, furniture: false, save: true });
+      this.toast('Placed ' + kind, 'success');
+    }
+
+    addLightAt(x, y, type = 'ceiling') {
+      this.pushHistory();
+      if (!this.plan.lights) this.plan.lights = [];
+      const newLight = {
+        id: FC.uid('lit'),
+        type,
+        x: FC.round(x, 3),
+        y: FC.round(y, 3),
+        z: type === 'lamp' ? 1.6 : 2.5,
+        color: '#fff1de',
+        intensity: 1.0,
+        range: 6.0,
+      };
+      this.plan.lights.push(newLight);
+      this.select({ type: 'light', id: newLight.id });
+      this.changed({ rooms: false, furniture: false, save: true });
+      this.toast('Light placed', 'success');
+    }
+
+    updateLight(id, key, val) {
+      const l = (this.plan.lights || []).find((x) => x.id === id);
+      if (!l) return;
+      l[key] = val;
+      this.changed({ rooms: false, furniture: false, save: false });
+      this.saveSoon();
+      if (this.viewer && this.viewer.active) this.viewer.markDirty();
+    }
+
+    deleteSelectedLight() {
+      const sel = this.ui.selection;
+      if (!sel || sel.type !== 'light') return;
+      this.pushHistory();
+      this.plan.lights = (this.plan.lights || []).filter((l) => l.id !== sel.id);
+      this.clearSelection();
+      this.changed({ rooms: false, furniture: false, save: true });
+      this.toast('Light removed', 'info');
     }
 
     clearFurniture() {
@@ -802,6 +967,38 @@
       this.saveSoon();
     }
 
+    toggleGridSnap() {
+      if (this.plan.settings.snapGrid === undefined) this.plan.settings.snapGrid = true;
+      this.plan.settings.snapGrid = !this.plan.settings.snapGrid;
+      if (this.editor) {
+        this.editor.gridSnap = this.plan.settings.snapGrid;
+        this.editor.draw();
+      }
+      this.toast(this.plan.settings.snapGrid ? 'Grid snapping enabled' : 'Grid snapping disabled (free positioning)', 'info');
+      if (this.ui) this.ui.renderToolrail();
+      this.saveSoon();
+    }
+
+    toggleOrthoSnap() {
+      if (this.plan.settings.snapAngle === undefined) this.plan.settings.snapAngle = true;
+      this.plan.settings.snapAngle = !this.plan.settings.snapAngle;
+      if (this.editor) {
+        this.editor.orthoSnap = this.plan.settings.snapAngle;
+        this.editor.draw();
+      }
+      this.toast(this.plan.settings.snapAngle ? 'Rotational snap enabled (straight walls)' : 'Rotational snapping disabled', 'info');
+      if (this.ui) this.ui.renderToolrail();
+      this.saveSoon();
+    }
+
+    toggleInvertPitch() {
+      if (this.plan.settings.invertPitch === undefined) this.plan.settings.invertPitch = true;
+      this.plan.settings.invertPitch = !this.plan.settings.invertPitch;
+      this.toast(this.plan.settings.invertPitch ? '3D vertical look inverted' : '3D vertical look standard', 'info');
+      if (this.ui) this.ui.renderSidebar();
+      this.saveSoon();
+    }
+
     setSunTime(value) {
       const time = FC.clamp(parseFloat(value) || 14.5, 0, 24);
       this.plan.view.sunTime = time;
@@ -831,49 +1028,49 @@
       }
       this._last2dStep = this.ui.step && this.ui.step <= 5 ? this.ui.step : 5;
       this._viewerToken++;
-      const token = this._viewerToken;
       this.ui.view3d = true;
       this.ui.step = step;
       this.ui.selection = null;
       this.ui.hideWelcome();
-      this.ui.show3DLoading(true);
       this.ui.setViewMode(true);
       this.ui.renderAll();
 
-      setTimeout(() => {
-        if (token !== this._viewerToken || !this.ui.view3d) return;
-        try {
-          if (this.viewer) {
-            this.viewer.activate();
-            this.viewer.fit(false);
-          }
-        } catch (err) {
-          console.error(err);
-          this.toast('3D rendering is unavailable in this browser.', 'error');
+      try {
+        if (this.viewer) {
+          this.viewer.activate();
+          this.viewer.startTransition('in');
         }
-        if (token !== this._viewerToken) return;
-        this.ui.show3DLoading(false);
-        this.ui.renderAll();
-      }, 90);
+      } catch (err) {
+        console.error(err);
+        this.toast('3D rendering is unavailable in this browser.', 'error');
+      }
     }
 
     exit3D(opts) {
       opts = opts || {};
       this._viewerToken++;
-      if (this.viewer) this.viewer.deactivate();
-      this.ui.show3DLoading(false);
-      this.ui.view3d = false;
-      this.ui.step = this._last2dStep || 5;
-      this.ui.selection = null;
-      this.ui.setViewMode(false);
-      if (this.ui) this.ui.renderAll();
-      if (!opts.silent) this.toast('Back to the plan', 'info');
-      requestAnimationFrame(() => {
-        if (!this.editor) return;
-        this.editor.resize();
-        if (!opts.noFit) this.editor.fit();
-        this.ui.updateHint();
-      });
+      if (this.viewer && this.ui.view3d) {
+        this.viewer.startTransition('out', () => {
+          this.ui.view3d = false;
+          this.ui.step = this._last2dStep || 5;
+          this.ui.selection = null;
+          this.ui.setViewMode(false);
+          if (this.ui) this.ui.renderAll();
+          if (!opts.silent) this.toast('Back to the plan', 'info');
+          requestAnimationFrame(() => {
+            if (!this.editor) return;
+            this.editor.resize();
+            if (!opts.noFit) this.editor.fit();
+            this.ui.updateHint();
+          });
+        });
+      } else {
+        this.ui.view3d = false;
+        this.ui.step = this._last2dStep || 5;
+        this.ui.selection = null;
+        this.ui.setViewMode(false);
+        if (this.ui) this.ui.renderAll();
+      }
     }
 
     /* ---------------------------------------------------------------- */
@@ -984,6 +1181,60 @@
       const data = JSON.stringify(this.plan, null, 2);
       downloadBlob(new Blob([data], { type: 'application/json' }), safeName(this.plan.name) + '.floorcraft.json');
       this.toast('Plan exported as JSON', 'success');
+    }
+
+    async exportGLB() {
+      if (!this.viewer) return;
+      try {
+        this.toast('Generating 3D GLB model...', 'info');
+        const blob = await this.viewer.exportGLB();
+        downloadBlob(blob, safeName(this.plan.name) + '.glb');
+        this.toast('3D model exported as GLB (.glb)', 'success');
+      } catch (err) {
+        console.error(err);
+        this.toast('Could not export GLB: ' + err.message, 'error');
+      }
+    }
+
+    exportDWG() {
+      try {
+        const dxf = FC.CAD.exportDXF(this.plan);
+        const blob = new Blob([dxf], { type: 'application/dxf' });
+        downloadBlob(blob, safeName(this.plan.name) + '.dwg');
+        this.toast('CAD drawing exported (.dwg / .dxf)', 'success');
+      } catch (err) {
+        console.error(err);
+        this.toast('Could not export CAD: ' + err.message, 'error');
+      }
+    }
+
+    importDWG() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.dwg,.dxf,.json';
+      input.style.display = 'none';
+      document.body.appendChild(input);
+      input.onchange = async () => {
+        const file = input.files && input.files[0];
+        input.remove();
+        if (!file) return;
+        const name = file.name.toLowerCase();
+        try {
+          if (name.endsWith('.json')) {
+            const text = await file.text();
+            this._importRaw(JSON.parse(text));
+            return;
+          }
+          const text = await file.text();
+          const importedPlan = FC.CAD.importDXF(text, { filename: file.name.replace(/\.[^/.]+$/, '') });
+          this._activatePlan(importedPlan);
+          this.toast('CAD floorplan imported successfully!', 'success');
+        } catch (err) {
+          console.error(err);
+          this.toast('Could not import CAD file: ' + err.message, 'error');
+        }
+      };
+      input.click();
     }
 
     importJSON() {
@@ -1198,7 +1449,14 @@
           this.setTool('window');
           e.preventDefault();
         } else if (key === 'r') {
-          this.setTool('room');
+          if (this.ui.selection && this.ui.selection.type === 'furniture') {
+            this.rotateSelectedFurniture();
+          } else {
+            this.setTool('room');
+          }
+          e.preventDefault();
+        } else if (key === 'l') {
+          this.setTool('light');
           e.preventDefault();
         } else if (key === '3') {
           if (this.ui.view3d) this.exit3D();

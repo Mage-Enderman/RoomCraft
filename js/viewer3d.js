@@ -182,7 +182,16 @@
       this.world = new THREE.Group();
       this.scene.add(this.world);
 
-      const style = FC.styles[plan.style] || FC.styles.scandinavian;
+      this.structure = new THREE.Group();
+      this.furnitureGroup = new THREE.Group();
+      this.userLightsGroup = new THREE.Group();
+      this.world.add(this.structure);
+      this.world.add(this.furnitureGroup);
+      this.world.add(this.userLightsGroup);
+
+      const style = (plan.style === 'custom' && plan.customStyle)
+        ? plan.customStyle
+        : FC.styles[plan.style] || FC.styles.scandinavian;
       const s = plan.settings;
       const H = s.wallHeight;
       const b = FC.planBounds(plan);
@@ -193,6 +202,7 @@
       this.buildWalls(plan, FC.getSegments(plan), style, H);
       if (plan.furnished) this.buildFurniture(plan, this.app.furniture || [], style, H);
       if (plan.view && plan.view.ceiling) this.buildCeiling(plan, this.app.rooms || [], style, H);
+      this.buildLights(plan);
       this.needsBuild = false;
       this.needsRender = true;
       this.applyXray(plan.view && plan.view.xray);
@@ -370,20 +380,20 @@
         mesh.rotation.y = -seg.angle;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
-        this.world.add(mesh);
+        this.structure.add(mesh);
 
         // fine architectural outline keeps wall tops and openings legible
         const edgeMat = new THREE.LineBasicMaterial({ color: 0x4c4841, transparent: true, opacity: 0.16 });
         const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 32), edgeMat);
         edges.position.copy(mesh.position);
         edges.rotation.copy(mesh.rotation);
-        this.world.add(edges);
+        this.structure.add(edges);
 
         // opening details
         const details = new THREE.Group();
         details.position.set((seg.a.x + seg.b.x) / 2, 0, (seg.a.y + seg.b.y) / 2);
         details.rotation.y = -seg.angle;
-        this.world.add(details);
+        this.structure.add(details);
         ops.forEach((pl) => {
           this.buildOpeningDetail(details, pl, L, t, H, style);
         });
@@ -537,7 +547,117 @@
         group.add(mesh);
       });
       this.ceilingGroup = group;
-      this.world.add(group);
+      this.structure.add(group);
+    }
+
+    buildLights(plan) {
+      if (this.userLightsGroup) {
+        disposeObject(this.userLightsGroup);
+      }
+      this.userLightsGroup = new THREE.Group();
+      this.world.add(this.userLightsGroup);
+
+      const lights = plan.lights || [];
+      lights.forEach((l) => {
+        const col = new THREE.Color(l.color || '#fff1de');
+        const intensity = (l.intensity != null ? l.intensity : 1.0) * 1.8;
+        const dist = (l.range || 6.0) * 1.2;
+
+        const pLight = new THREE.PointLight(col, intensity, dist, 2);
+        pLight.position.set(l.x, l.z || 2.4, l.y);
+        pLight.castShadow = true;
+        pLight.shadow.bias = -0.002;
+        pLight.shadow.mapSize.set(512, 512);
+        this.userLightsGroup.add(pLight);
+
+        // Fixture mesh (glow bulb and casing)
+        const fixGroup = new THREE.Group();
+        fixGroup.position.copy(pLight.position);
+
+        const bulbGeo = new THREE.SphereGeometry(0.08, 12, 12);
+        const bulbMat = new THREE.MeshBasicMaterial({ color: col });
+        const bulbMesh = new THREE.Mesh(bulbGeo, bulbMat);
+        fixGroup.add(bulbMesh);
+
+        if (l.type === 'pendant') {
+          const H = (plan.settings && plan.settings.wallHeight) || 2.7;
+          const cordLen = Math.max(0.15, H - (l.z || 2.4));
+          const cordGeo = new THREE.CylinderGeometry(0.012, 0.012, cordLen);
+          const cordMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+          const cord = new THREE.Mesh(cordGeo, cordMat);
+          cord.position.y = cordLen / 2;
+          fixGroup.add(cord);
+        } else if (l.type === 'lamp') {
+          const poleGeo = new THREE.CylinderGeometry(0.018, 0.018, l.z || 1.6);
+          const poleMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b });
+          const pole = new THREE.Mesh(poleGeo, poleMat);
+          pole.position.y = -(l.z || 1.6) / 2;
+          fixGroup.add(pole);
+        }
+
+        this.userLightsGroup.add(fixGroup);
+      });
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Transitions & Export                                             */
+    /* ---------------------------------------------------------------- */
+
+    startTransition(dir, onDone) {
+      this.isTransitioning = true;
+      this.transitionDir = dir;
+      this.transitionStart = performance.now();
+      this.transitionDuration = dir === 'in' ? 950 : 450;
+      this.onTransitionEnd = onDone;
+      const b = FC.planBounds(this.app.plan);
+
+      if (dir === 'in') {
+        this.transitionProgress = 0.001;
+        if (this.structure) this.structure.scale.y = 0.001;
+        if (this.furnitureGroup) {
+          this.furnitureGroup.scale.y = 0.001;
+          this.furnitureGroup.position.y = -0.15;
+        }
+        this.orbit.pitch = 1.55; // Straight top-down
+        this.orbit.yaw = 0;
+        this.orbit.tx = b.cx;
+        this.orbit.tz = b.cy;
+        this.orbit.ty = 0;
+        this.orbit.dist = Math.max(9, Math.max(b.w, b.d) * 1.5 + 2);
+        this.goal.pitch = 0.82; // Perspective dollhouse view
+        this.goal.yaw = -0.65;
+        this.goal.ty = 0.9;
+        this.goal.dist = Math.max(9, Math.max(b.w, b.d) * 1.8 + 2);
+      } else {
+        this.goal.pitch = 1.55;
+        this.goal.yaw = 0;
+        this.goal.ty = 0;
+      }
+    }
+
+    exportGLB() {
+      if (!this.world) this.build();
+      if (!window.THREE || !window.THREE.GLTFExporter) {
+        return Promise.reject(new Error('GLTFExporter is not loaded.'));
+      }
+      const exporter = new window.THREE.GLTFExporter();
+      const exportGroup = new THREE.Group();
+      this.world.traverse((child) => {
+        if (child.isMesh && child !== this.ground && child !== this.grid) {
+          exportGroup.add(child.clone());
+        }
+      });
+      return new Promise((resolve, reject) => {
+        exporter.parse(
+          exportGroup,
+          (gltf) => {
+            const blob = new Blob([gltf], { type: 'model/gltf-binary' });
+            resolve(blob);
+          },
+          (err) => reject(err),
+          { binary: true }
+        );
+      });
     }
 
     /* ---------------------------------------------------------------- */
@@ -657,7 +777,9 @@
       this.dragging.y = e.clientY;
       if (this.dragging.mode === 'rotate') {
         this.goal.yaw -= dx * 0.006;
-        this.goal.pitch = FC.clamp(this.goal.pitch - dy * 0.005, 0.08, 1.52);
+        const invert = this.app.plan.settings.invertPitch ?? true;
+        const sign = invert ? 1 : -1;
+        this.goal.pitch = FC.clamp(this.goal.pitch + sign * dy * 0.005, 0.08, 1.52);
       } else {
         const f = this.goal.dist * 0.0018;
         const right = { x: Math.cos(this.goal.yaw), z: -Math.sin(this.goal.yaw) };
@@ -676,11 +798,40 @@
       requestAnimationFrame(this.animate);
       if (!this.active) return;
       if (this.needsBuild) this.build();
+
+      if (this.isTransitioning) {
+        const now = performance.now();
+        const elapsed = now - this.transitionStart;
+        const dur = this.transitionDuration || 900;
+        const t = Math.min(1, elapsed / dur);
+        // Smooth easeInOutCubic
+        const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        this.transitionProgress = this.transitionDir === 'in' ? ease : 1 - ease;
+        if (this.structure) this.structure.scale.y = Math.max(0.001, this.transitionProgress);
+        if (this.furnitureGroup) {
+          this.furnitureGroup.scale.y = Math.max(0.001, this.transitionProgress);
+          this.furnitureGroup.position.y = (this.transitionProgress - 1) * 0.15;
+        }
+        if (t >= 1) {
+          this.isTransitioning = false;
+          if (this.structure) this.structure.scale.y = this.transitionDir === 'in' ? 1 : 0.001;
+          if (this.furnitureGroup) {
+            this.furnitureGroup.scale.y = this.transitionDir === 'in' ? 1 : 0.001;
+            this.furnitureGroup.position.y = 0;
+          }
+          if (this.onTransitionEnd) {
+            const cb = this.onTransitionEnd;
+            this.onTransitionEnd = null;
+            cb();
+          }
+        }
+      }
+
       const dt = Math.min(0.05, this.clock ? this.clock.getDelta() : 0.016);
-      if (this.app.plan.view && this.app.plan.view.autoRotate && !this.dragging) {
+      if (this.app.plan.view && this.app.plan.view.autoRotate && !this.dragging && !this.isTransitioning) {
         this.goal.yaw += dt * 0.16;
       }
-      const k = 0.16;
+      const k = this.isTransitioning ? 0.09 : 0.16;
       this.orbit.yaw += (this.goal.yaw - this.orbit.yaw) * k;
       this.orbit.pitch += (this.goal.pitch - this.orbit.pitch) * k;
       this.orbit.dist += (this.goal.dist - this.orbit.dist) * k;

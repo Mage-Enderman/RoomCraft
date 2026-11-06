@@ -11,6 +11,7 @@
     window: '<rect x="3" y="4.8" width="18" height="14.4" rx="1.4"/><path d="M12 4.8v14.4M3 12h18"/>',
     layout: '<rect x="3" y="3" width="18" height="18" rx="2.2"/><path d="M3 9h18M9.4 9v12"/>',
     grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/>',
+    ortho: '<path d="M5 4v15h15"/><path d="M5 13h6v6"/>',
     ruler: '<path d="M3.8 15.1L15.1 3.8l5.1 5.1L9 20.2 3.8 15.1z"/><path d="M8 11l2 2M11 8l2 2M14 5l2 2"/>',
     light: '<path d="M9.2 18h5.6M10.2 21h3.6"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5.9 1.2.9 2V17h5.4v-1.2c0-.8.3-1.5.9-2A6 6 0 0 0 12 3z"/>',
     sliders: '<path d="M4 6.5h7M16 6.5h4M4 12h3M12 12h8M4 17.5h9M18 17.5h2"/><circle cx="13.5" cy="6.5" r="2.1"/><circle cx="9.5" cy="12" r="2.1"/><circle cx="15.5" cy="17.5" r="2.1"/>',

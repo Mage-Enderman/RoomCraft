@@ -19,6 +19,8 @@
     windowHeight: 1.2,
     windowWidth: 1.4,
     showDims: true,
+    snapGrid: true,
+    snapAngle: true,
   };
 
   FC.roomTypes = {
@@ -64,8 +66,36 @@
       cabinet: '#50504f', fabric: '#57575a', accent: '#2f3032', linen: '#cfcac2',
       metal: '#2e2f31', dark: '#232426', rug: '#bab4aa', stone: '#dedad2',
     },
+    minimalist: {
+      name: 'Minimalist',
+      swatches: ['#ffffff', '#ebebeb', '#888888', '#111111'],
+      wall: '#fdfdfd', wallOutside: '#efefef', floor: '#dedede', wood: '#3a3a3c',
+      cabinet: '#f5f5f7', fabric: '#8e8e93', accent: '#111111', linen: '#ffffff',
+      metal: '#1c1c1e', dark: '#000000', rug: '#ebebf0', stone: '#f2f2f7',
+    },
+    terracotta: {
+      name: 'Terracotta',
+      swatches: ['#d97d54', '#f5e6d3', '#9c5333', '#4f6b58'],
+      wall: '#f5ede4', wallOutside: '#e8dbce', floor: '#c47853', wood: '#824936',
+      cabinet: '#eedbc5', fabric: '#ba6e50', accent: '#4f6b58', linen: '#faf3eb',
+      metal: '#3b2f2f', dark: '#2b1f1a', rug: '#e2ccb8', stone: '#d99b82',
+    },
+    slatebrass: {
+      name: 'Nordic Slate',
+      swatches: ['#475569', '#f8fafc', '#d97706', '#1e293b'],
+      wall: '#f1f5f9', wallOutside: '#e2e8f0', floor: '#64748b', wood: '#78350f',
+      cabinet: '#334155', fabric: '#94a3b8', accent: '#d97706', linen: '#ffffff',
+      metal: '#b45309', dark: '#0f172a', rug: '#cbd5e1', stone: '#475569',
+    },
+    sageoak: {
+      name: 'Sage & Oak',
+      swatches: ['#82957b', '#f6f5f0', '#b5885c', '#465541'],
+      wall: '#f3f4ed', wallOutside: '#e5e7dc', floor: '#bfa37e', wood: '#8a623f',
+      cabinet: '#cad2c5', fabric: '#84a98c', accent: '#465541', linen: '#faf9f6',
+      metal: '#2f3e2e', dark: '#1e281d', rug: '#d8e2dc', stone: '#c5d3c1',
+    },
   };
-  FC.styleOrder = ['scandinavian', 'japandi', 'warmmodern', 'urbanloft'];
+  FC.styleOrder = ['scandinavian', 'japandi', 'warmmodern', 'urbanloft', 'minimalist', 'terracotta', 'slatebrass', 'sageoak'];
 
   /* ------------------------------------------------------------------ */
   /* Math helpers                                                       */
@@ -214,6 +244,100 @@
   };
 
   /* ------------------------------------------------------------------ */
+  /* Junctions and wall operations                                      */
+  /* ------------------------------------------------------------------ */
+
+  FC.findJunctions = function (plan, tol = 0.06) {
+    const junctions = [];
+    function findNear(p) {
+      return junctions.find((j) => Math.hypot(j.x - p.x, j.y - p.y) <= tol);
+    }
+    (plan.outline || []).forEach((p, idx) => {
+      let j = findNear(p);
+      if (!j) {
+        j = { id: 'j_out_' + idx, x: p.x, y: p.y, refs: [] };
+        junctions.push(j);
+      }
+      j.refs.push({ type: 'outline', index: idx });
+    });
+    (plan.walls || []).forEach((w) => {
+      [{ p: w.a, end: 0 }, { p: w.b, end: 1 }].forEach((pt) => {
+        let j = findNear(pt.p);
+        if (!j) {
+          j = { id: 'j_w_' + w.id + '_' + pt.end, x: pt.p.x, y: pt.p.y, refs: [] };
+          junctions.push(j);
+        }
+        j.refs.push({ type: 'wall', wallId: w.id, end: pt.end });
+      });
+    });
+    return junctions;
+  };
+
+  FC.moveJunction = function (plan, junction, newX, newY) {
+    const rx = FC.round(newX, 3);
+    const ry = FC.round(newY, 3);
+    junction.refs.forEach((ref) => {
+      if (ref.type === 'outline') {
+        const p = plan.outline[ref.index];
+        if (p) {
+          p.x = rx;
+          p.y = ry;
+        }
+      } else if (ref.type === 'wall') {
+        const wall = plan.walls.find((w) => w.id === ref.wallId);
+        if (wall) {
+          const target = ref.end === 0 ? wall.a : wall.b;
+          target.x = rx;
+          target.y = ry;
+        }
+      }
+    });
+    junction.x = rx;
+    junction.y = ry;
+  };
+
+  FC.resizeWall = function (plan, wallId, newLen, fromEnd = 0) {
+    const wall = plan.walls.find((w) => w.id === wallId);
+    if (!wall) return false;
+    const curLen = FC.dist(wall.a, wall.b);
+    if (curLen < 1e-4) return false;
+    newLen = Math.max(0.3, newLen);
+    const dir = { x: (wall.b.x - wall.a.x) / curLen, y: (wall.b.y - wall.a.y) / curLen };
+
+    if (fromEnd === 0) {
+      wall.b.x = FC.round(wall.a.x + dir.x * newLen, 3);
+      wall.b.y = FC.round(wall.a.y + dir.y * newLen, 3);
+    } else if (fromEnd === 1) {
+      wall.a.x = FC.round(wall.b.x - dir.x * newLen, 3);
+      wall.a.y = FC.round(wall.b.y - dir.y * newLen, 3);
+    } else {
+      const mid = FC.lerp(wall.a, wall.b, 0.5);
+      const half = newLen / 2;
+      wall.a.x = FC.round(mid.x - dir.x * half, 3);
+      wall.a.y = FC.round(mid.y - dir.y * half, 3);
+      wall.b.x = FC.round(mid.x + dir.x * half, 3);
+      wall.b.y = FC.round(mid.y + dir.y * half, 3);
+    }
+    return true;
+  };
+
+  FC.splitWall = function (plan, wallId, point) {
+    const wall = plan.walls.find((w) => w.id === wallId);
+    if (!wall) return null;
+    const p = { x: FC.round(point.x, 3), y: FC.round(point.y, 3) };
+    const oldB = { x: wall.b.x, y: wall.b.y };
+    wall.b.x = p.x;
+    wall.b.y = p.y;
+    const newWall = {
+      id: FC.uid('w'),
+      a: { x: p.x, y: p.y },
+      b: oldB,
+    };
+    plan.walls.push(newWall);
+    return newWall;
+  };
+
+  /* ------------------------------------------------------------------ */
   /* Plans                                                              */
   /* ------------------------------------------------------------------ */
 
@@ -228,9 +352,12 @@
       walls: [],
       openings: [],
       rooms: [],
+      lights: [],
       settings: Object.assign({}, FC.defaultSettings),
       style: 'scandinavian',
+      customStyle: null,
       density: 1,
+      layoutVariation: 0,
       furnished: false,
       view: { sunTime: 14.5, ceiling: false, xray: false, autoRotate: false },
     };
@@ -263,6 +390,19 @@
           }))
       : [];
     plan.rooms = Array.isArray(raw.rooms) ? raw.rooms : [];
+    plan.lights = Array.isArray(raw.lights)
+      ? raw.lights.map((l) => ({
+          id: l.id || FC.uid('lit'),
+          type: l.type || 'ceiling',
+          x: +l.x || 0,
+          y: +l.y || 0,
+          z: +l.z || 2.4,
+          intensity: l.intensity != null ? +l.intensity : 1.0,
+          color: l.color || '#fff1de',
+          range: +l.range || 6.0,
+        }))
+      : [];
+    plan.layoutVariation = parseInt(raw.layoutVariation, 10) || 0;
     plan.settings.wallHeight = clamp(plan.settings.wallHeight, 1.8, 5);
     plan.density = clamp(+raw.density || 1, 0.4, 1.6);
     return plan;
@@ -296,6 +436,13 @@
       { id: 'g4', kind: 'window', style: 'sliding', hostKey: 'o:1', offset: 2.0, width: 1.4, height: 1.4, sill: 0.8 },
       { id: 'g5', kind: 'window', style: 'standard', hostKey: 'o:2', offset: 3.0, width: 2.4, height: 1.4, sill: 0.7 },
       { id: 'g6', kind: 'window', style: 'standard', hostKey: 'o:3', offset: 2.2, width: 1.6, height: 1.2, sill: 1.0 },
+    ];
+    plan.lights = [
+      { id: 'l1', type: 'pendant', x: 2.5, y: 6.2, z: 2.4, color: '#fff1de', intensity: 1.0, range: 6 },
+      { id: 'l2', type: 'ceiling', x: 2.5, y: 2.2, z: 2.6, color: '#ffeacc', intensity: 0.9, range: 5 },
+      { id: 'l3', type: 'spot', x: 9.2, y: 2.2, z: 2.5, color: '#fef3e2', intensity: 1.1, range: 5 },
+      { id: 'l4', type: 'lamp', x: 4.6, y: 7.4, z: 1.6, color: '#ffd6aa', intensity: 0.8, range: 4 },
+      { id: 'l5', type: 'ceiling', x: 6.2, y: 1.3, z: 2.6, color: '#ffffff', intensity: 0.9, range: 4 },
     ];
     plan.style = 'scandinavian';
     plan.furnished = true;
@@ -750,22 +897,22 @@
 
   FC.furnishPlan = function (plan, rooms) {
     if (!plan.furnished) return [];
-    const style = FC.styles[plan.style] || FC.styles.scandinavian;
     const density = plan.density == null ? 1 : plan.density;
     const items = [];
     let count = 0;
+    const globalVar = parseInt(plan.layoutVariation, 10) || 0;
 
     function add(room, kind, x, y, w, d, rot, opts) {
       opts = opts || {};
       const item = {
-        id: 'f' + count++,
+        id: opts.id || (room.id ? room.id + '_' + kind + '_' + count++ : 'f' + count++),
         roomId: room.id,
         kind,
-        x,
-        y,
-        w,
-        d,
-        rot: rot || 0,
+        x: FC.round(x, 3),
+        y: FC.round(y, 3),
+        w: FC.round(w, 3),
+        d: FC.round(d, 3),
+        rot: FC.round(rot || 0, 3),
         h: opts.h || FURNITURE_HEIGHTS[kind] || 0.6,
         elev: opts.elev || 0,
         mat: opts.mat || 'wood',
@@ -777,9 +924,9 @@
       return item;
     }
 
-    rooms.forEach((room) => {
+    rooms.forEach((room, roomIdx) => {
       const b = room.bounds || FC.polygonBounds(room.polygon);
-      const pad = 0.12;
+      const pad = 0.14;
       const x0 = b.x0 + pad;
       const y0 = b.y0 + pad;
       const x1 = b.x1 - pad;
@@ -789,25 +936,72 @@
       const cx = (x0 + x1) / 2;
       const cy = (y0 + y1) / 2;
       const type = room.type || 'living';
+      const variant = (globalVar + (room.layoutVariant != null ? room.layoutVariant : roomIdx)) % 3;
 
       if (type === 'bedroom') {
-        const bedW = clamp(W * 0.44, 1.25, 1.9);
+        const bedW = clamp(W * 0.44, 1.3, 1.9);
         const bedD = clamp(D * 0.48, 1.85, 2.1);
-        const bedX = x0 + Math.min(W - bedW / 2 - 0.15, W * 0.44);
-        const bedY = y0 + bedD / 2 + 0.1;
-        add(room, 'bed', bedX, bedY, bedW, bedD, 0, { mat: 'wood' });
-        add(room, 'nightstand', bedX - bedW / 2 - 0.28, y0 + 0.32, 0.44, 0.4, 0, { mat: 'wood' });
-        if (bedX + bedW / 2 + 0.5 < x1) add(room, 'nightstand', bedX + bedW / 2 + 0.28, y0 + 0.32, 0.44, 0.4, 0, { mat: 'wood' });
-        const wardrobeW = Math.min(2.1, W * 0.5);
-        add(room, 'wardrobe', x0 + wardrobeW / 2 + 0.05, y1 - 0.32, wardrobeW, 0.62, Math.PI, { mat: 'cabinet' });
-        if (W > 3.4 && D > 3.4) add(room, 'rug', bedX, Math.min(y1 - 0.8, y0 + bedD + 0.75), Math.min(2.4, W * 0.6), 0.9, 0, { mat: 'rug', decor: true });
-        if (density > 1.05) add(room, 'plant', x1 - 0.32, y1 - 0.32, 0.5, 0.5, 0, { mat: 'plant', decor: true });
+
+        if (variant === 0) {
+          // North headboard setup
+          const bedX = x0 + Math.min(W - bedW / 2 - 0.15, W * 0.45);
+          const bedY = y0 + bedD / 2 + 0.1;
+          add(room, 'bed', bedX, bedY, bedW, bedD, 0, { mat: 'wood' });
+          add(room, 'nightstand', bedX - bedW / 2 - 0.26, y0 + 0.32, 0.44, 0.4, 0, { mat: 'wood' });
+          if (bedX + bedW / 2 + 0.5 < x1) add(room, 'nightstand', bedX + bedW / 2 + 0.26, y0 + 0.32, 0.44, 0.4, 0, { mat: 'wood' });
+          const wardrobeW = Math.min(2.2, W * 0.52);
+          add(room, 'wardrobe', x0 + wardrobeW / 2 + 0.05, y1 - 0.32, wardrobeW, 0.62, Math.PI, { mat: 'cabinet' });
+          if (W > 3.2 && D > 3.2) add(room, 'rug', bedX, Math.min(y1 - 0.8, y0 + bedD + 0.75), Math.min(2.4, W * 0.6), 0.95, 0, { mat: 'rug', decor: true });
+          if (density > 1.05) add(room, 'plant', x1 - 0.32, y1 - 0.32, 0.5, 0.5, 0, { mat: 'plant', decor: true });
+        } else if (variant === 1) {
+          // West headboard setup with side desk
+          const bedX = x0 + bedD / 2 + 0.1;
+          const bedY = cy;
+          add(room, 'bed', bedX, bedY, bedD, bedW, Math.PI / 2, { mat: 'wood' });
+          add(room, 'nightstand', x0 + 0.3, bedY - bedW / 2 - 0.26, 0.4, 0.44, Math.PI / 2, { mat: 'wood' });
+          add(room, 'nightstand', x0 + 0.3, bedY + bedW / 2 + 0.26, 0.4, 0.44, Math.PI / 2, { mat: 'wood' });
+          const wardrobeW = Math.min(2.0, D * 0.5);
+          add(room, 'wardrobe', x1 - 0.32, cy, 0.62, wardrobeW, -Math.PI / 2, { mat: 'cabinet' });
+          if (W > 3.2) {
+            add(room, 'desk', cx + 0.3, y0 + 0.38, Math.min(1.4, W * 0.35), 0.55, 0, { mat: 'wood' });
+            add(room, 'chair', cx + 0.3, y0 + 0.85, 0.45, 0.45, Math.PI, { mat: 'fabric' });
+          }
+          add(room, 'rug', bedX + 0.8, bedY, 1.2, Math.min(2.2, D * 0.6), 0, { mat: 'rug', decor: true });
+        } else {
+          // East headboard with reading lounge chair & dresser
+          const bedX = x1 - bedD / 2 - 0.1;
+          const bedY = cy;
+          add(room, 'bed', bedX, bedY, bedD, bedW, -Math.PI / 2, { mat: 'wood' });
+          add(room, 'nightstand', x1 - 0.3, bedY - bedW / 2 - 0.26, 0.4, 0.44, -Math.PI / 2, { mat: 'wood' });
+          add(room, 'nightstand', x1 - 0.3, bedY + bedW / 2 + 0.26, 0.4, 0.44, -Math.PI / 2, { mat: 'wood' });
+          add(room, 'wardrobe', x0 + 0.32, cy, 0.62, Math.min(2.1, D * 0.52), Math.PI / 2, { mat: 'cabinet' });
+          add(room, 'chair', x0 + 0.6, y1 - 0.6, 0.65, 0.65, -0.7, { mat: 'fabric' });
+          add(room, 'floorLamp', x0 + 0.25, y1 - 0.25, 0.4, 0.4, 0, { mat: 'metal', decor: true });
+          add(room, 'rug', cx, cy, Math.min(2.2, W * 0.55), Math.min(1.6, D * 0.45), 0, { mat: 'rug', decor: true });
+        }
       } else if (type === 'bathroom') {
-        const sh = Math.min(0.98, Math.min(W * 0.48, D * 0.5));
-        add(room, 'shower', x0 + sh / 2 + 0.05, y0 + sh / 2 + 0.05, sh, sh, 0, { mat: 'stone' });
-        add(room, 'vanity', x0 + Math.min(0.95, W * 0.52) / 2 + 0.06, y1 - 0.3, Math.min(0.95, W * 0.52), 0.5, Math.PI, { mat: 'cabinet' });
-        add(room, 'toilet', x1 - 0.32, y0 + 0.62, 0.42, 0.66, Math.PI / 2, { mat: 'stone' });
-        add(room, 'bathMat', cx, cy + 0.25, Math.min(0.8, W * 0.5), 0.55, 0, { mat: 'linen', decor: true });
+        if (variant === 0) {
+          // Shower + vanity + toilet
+          const sh = Math.min(0.98, Math.min(W * 0.48, D * 0.5));
+          add(room, 'shower', x0 + sh / 2 + 0.05, y0 + sh / 2 + 0.05, sh, sh, 0, { mat: 'stone' });
+          add(room, 'vanity', x0 + Math.min(0.95, W * 0.52) / 2 + 0.06, y1 - 0.3, Math.min(0.95, W * 0.52), 0.5, Math.PI, { mat: 'cabinet' });
+          add(room, 'toilet', x1 - 0.32, y0 + 0.62, 0.42, 0.66, Math.PI / 2, { mat: 'stone' });
+          add(room, 'bathMat', cx, cy + 0.25, Math.min(0.8, W * 0.5), 0.55, 0, { mat: 'linen', decor: true });
+        } else if (variant === 1) {
+          // Bathtub along back wall + vanity
+          const tubLen = Math.min(1.7, Math.max(1.2, W - 0.6));
+          add(room, 'bathtub', cx, y0 + 0.42, tubLen, 0.75, 0, { mat: 'stone' });
+          add(room, 'vanity', x0 + 0.3, y1 - 0.4, 0.5, Math.min(1.0, D * 0.45), Math.PI / 2, { mat: 'cabinet' });
+          add(room, 'toilet', x1 - 0.32, y1 - 0.45, 0.42, 0.66, -Math.PI / 2, { mat: 'stone' });
+          add(room, 'bathMat', cx, cy + 0.3, 0.8, 0.5, 0, { mat: 'linen', decor: true });
+        } else {
+          // Corner shower + side vanity
+          const sh = Math.min(1.05, Math.min(W * 0.5, D * 0.5));
+          add(room, 'shower', x1 - sh / 2 - 0.05, y0 + sh / 2 + 0.05, sh, sh, 0, { mat: 'stone' });
+          add(room, 'vanity', cx - 0.2, y1 - 0.3, Math.min(1.2, W * 0.6), 0.5, Math.PI, { mat: 'cabinet' });
+          add(room, 'toilet', x0 + 0.32, y0 + 0.6, 0.42, 0.66, -Math.PI / 2, { mat: 'stone' });
+          add(room, 'bathMat', cx, cy + 0.1, 0.75, 0.5, 0, { mat: 'linen', decor: true });
+        }
       } else if (type === 'hallway') {
         const long = D > W;
         if (long) {
@@ -819,36 +1013,95 @@
         }
         if (density > 1.15) add(room, 'plant', x1 - 0.32, y1 - 0.32, 0.45, 0.45, 0, { mat: 'plant', decor: true });
       } else if (type === 'kitchen') {
-        add(room, 'counter', cx, y0 + 0.31, Math.max(1.0, W - 0.55), 0.62, 0, { mat: 'cabinet', variant: 'sink' });
-        add(room, 'upperCabinets', cx, y0 + 0.19, Math.max(0.9, W - 1.2), 0.34, 0, { mat: 'cabinet', elev: 1.5, h: 0.7 });
-        const sideLen = Math.min(D - 1.0, 2.6);
-        if (sideLen > 1.0) {
+        if (variant === 0) {
+          // L-shaped counter with island
+          add(room, 'counter', cx, y0 + 0.31, Math.max(1.0, W - 0.55), 0.62, 0, { mat: 'cabinet', variant: 'sink' });
+          add(room, 'upperCabinets', cx, y0 + 0.19, Math.max(0.9, W - 1.2), 0.34, 0, { mat: 'cabinet', elev: 1.5, h: 0.7 });
+          const sideLen = Math.min(D - 1.0, 2.6);
+          if (sideLen > 1.0) {
+            add(room, 'counter', x1 - 0.31, y0 + 0.7 + sideLen / 2, sideLen, 0.62, Math.PI / 2, { mat: 'cabinet', variant: 'stove' });
+          }
+          add(room, 'fridge', x0 + 0.4, y1 - 0.42, 0.74, 0.72, Math.PI, { mat: 'metal' });
+          if (W > 4.6 && D > 3) {
+            add(room, 'island', cx, cy + 0.2, 1.5, 0.7, 0, { mat: 'cabinet' });
+            add(room, 'stool', cx - 0.4, cy + 0.78, 0.38, 0.38, 0, { mat: 'wood' });
+            add(room, 'stool', cx + 0.4, cy + 0.78, 0.38, 0.38, 0, { mat: 'wood' });
+          }
+        } else if (variant === 1) {
+          // Galley layout: dual parallel counters
+          add(room, 'counter', cx, y0 + 0.31, Math.max(1.0, W - 0.4), 0.62, 0, { mat: 'cabinet', variant: 'sink' });
+          add(room, 'counter', cx, y1 - 0.31, Math.max(1.0, W - 1.2), 0.62, Math.PI, { mat: 'cabinet', variant: 'stove' });
+          add(room, 'fridge', x1 - 0.42, y1 - 0.42, 0.74, 0.72, Math.PI, { mat: 'metal' });
+        } else {
+          // U-shaped kitchen layout
+          add(room, 'counter', cx, y0 + 0.31, Math.max(1.0, W - 0.4), 0.62, 0, { mat: 'cabinet', variant: 'sink' });
+          const sideLen = Math.min(D - 0.8, 2.2);
+          add(room, 'counter', x0 + 0.31, y0 + 0.7 + sideLen / 2, sideLen, 0.62, -Math.PI / 2, { mat: 'cabinet' });
           add(room, 'counter', x1 - 0.31, y0 + 0.7 + sideLen / 2, sideLen, 0.62, Math.PI / 2, { mat: 'cabinet', variant: 'stove' });
-        }
-        add(room, 'fridge', x0 + 0.4, y1 - 0.42, 0.74, 0.72, Math.PI, { mat: 'metal' });
-        if (W > 4.6 && D > 3) {
-          add(room, 'island', cx, cy + 0.2, 1.5, 0.7, 0, { mat: 'cabinet' });
-          add(room, 'stool', cx - 0.4, cy + 0.78, 0.38, 0.38, 0, { mat: 'wood' });
-          add(room, 'stool', cx + 0.4, cy + 0.78, 0.38, 0.38, 0, { mat: 'wood' });
+          add(room, 'fridge', x0 + 0.4, y1 - 0.42, 0.74, 0.72, Math.PI, { mat: 'metal' });
         }
       } else if (type === 'dining') {
-        const tw = Math.min(1.8, W * 0.55);
-        const td = Math.min(0.95, D * 0.45);
-        add(room, 'diningTable', cx, cy, tw, td, 0, { mat: 'wood' });
-        const chairDist = td / 2 + 0.42;
-        add(room, 'chair', cx - tw / 4, cy - chairDist, 0.46, 0.46, 0, { mat: 'wood' });
-        add(room, 'chair', cx + tw / 4, cy - chairDist, 0.46, 0.46, 0, { mat: 'wood' });
-        add(room, 'chair', cx - tw / 4, cy + chairDist, 0.46, 0.46, Math.PI, { mat: 'wood' });
-        add(room, 'chair', cx + tw / 4, cy + chairDist, 0.46, 0.46, Math.PI, { mat: 'wood' });
-        add(room, 'pendant', cx, cy, 0.5, 0.5, 0, { mat: 'metal', elev: 2.05, h: 0.4, decor: true });
-        if (W > 3.6) add(room, 'sideboard', cx, y0 + 0.25, Math.min(1.8, W * 0.55), 0.42, 0, { mat: 'wood', decor: true });
+        if (variant === 0) {
+          // Classic rectangular table
+          const tw = Math.min(1.8, W * 0.55);
+          const td = Math.min(0.95, D * 0.45);
+          add(room, 'diningTable', cx, cy, tw, td, 0, { mat: 'wood' });
+          const chairDist = td / 2 + 0.42;
+          add(room, 'chair', cx - tw / 4, cy - chairDist, 0.46, 0.46, 0, { mat: 'wood' });
+          add(room, 'chair', cx + tw / 4, cy - chairDist, 0.46, 0.46, 0, { mat: 'wood' });
+          add(room, 'chair', cx - tw / 4, cy + chairDist, 0.46, 0.46, Math.PI, { mat: 'wood' });
+          add(room, 'chair', cx + tw / 4, cy + chairDist, 0.46, 0.46, Math.PI, { mat: 'wood' });
+          add(room, 'pendant', cx, cy, 0.5, 0.5, 0, { mat: 'metal', elev: 2.05, h: 0.4, decor: true });
+          if (W > 3.6) add(room, 'sideboard', cx, y0 + 0.25, Math.min(1.8, W * 0.55), 0.42, 0, { mat: 'wood', decor: true });
+        } else if (variant === 1) {
+          // Round dining table setup
+          const dia = Math.min(1.3, Math.min(W * 0.48, D * 0.48));
+          add(room, 'diningTable', cx, cy, dia, dia, 0, { mat: 'wood' });
+          add(room, 'chair', cx, cy - dia / 2 - 0.38, 0.46, 0.46, 0, { mat: 'fabric' });
+          add(room, 'chair', cx, cy + dia / 2 + 0.38, 0.46, 0.46, Math.PI, { mat: 'fabric' });
+          add(room, 'chair', cx - dia / 2 - 0.38, cy, 0.46, 0.46, -Math.PI / 2, { mat: 'fabric' });
+          add(room, 'chair', cx + dia / 2 + 0.38, cy, 0.46, 0.46, Math.PI / 2, { mat: 'fabric' });
+          add(room, 'pendant', cx, cy, 0.45, 0.45, 0, { mat: 'metal', elev: 2.05, h: 0.4, decor: true });
+          add(room, 'sideboard', x1 - 0.25, cy, 0.4, Math.min(1.6, D * 0.5), Math.PI / 2, { mat: 'wood', decor: true });
+        } else {
+          // Long feast table aligned with side wall
+          const tw = Math.min(2.1, W * 0.6);
+          const td = Math.min(0.85, D * 0.4);
+          add(room, 'diningTable', cx, cy + 0.2, tw, td, 0, { mat: 'wood' });
+          add(room, 'chair', cx - tw * 0.32, cy - td / 2 - 0.4, 0.46, 0.46, 0, { mat: 'wood' });
+          add(room, 'chair', cx, cy - td / 2 - 0.4, 0.46, 0.46, 0, { mat: 'wood' });
+          add(room, 'chair', cx + tw * 0.32, cy - td / 2 - 0.4, 0.46, 0.46, 0, { mat: 'wood' });
+          add(room, 'chair', cx - tw * 0.32, cy + td / 2 + 0.4, 0.46, 0.46, Math.PI, { mat: 'wood' });
+          add(room, 'chair', cx, cy + td / 2 + 0.4, 0.46, 0.46, Math.PI, { mat: 'wood' });
+          add(room, 'chair', cx + tw * 0.32, cy + td / 2 + 0.4, 0.46, 0.46, Math.PI, { mat: 'wood' });
+          add(room, 'sideboard', cx, y0 + 0.24, Math.min(2.0, W * 0.55), 0.4, 0, { mat: 'wood', decor: true });
+        }
       } else if (type === 'office') {
-        const dw = Math.min(1.9, W * 0.6);
-        add(room, 'desk', cx, y0 + 0.38, dw, 0.66, 0, { mat: 'wood' });
-        add(room, 'monitor', cx, y0 + 0.22, 0.62, 0.12, 0, { mat: 'metal', elev: 0.78, h: 0.4 });
-        add(room, 'chair', cx, y0 + 1.05, 0.5, 0.5, Math.PI, { mat: 'fabric' });
-        add(room, 'bookshelf', x1 - 0.2, cy, Math.min(1.9, D * 0.55), 0.36, Math.PI / 2, { mat: 'wood' });
-        add(room, 'rug', cx, cy + 0.35, Math.min(2.3, W * 0.65), Math.min(1.6, D * 0.4), 0, { mat: 'rug', decor: true });
+        if (variant === 0) {
+          // Center executive desk
+          const dw = Math.min(1.9, W * 0.6);
+          add(room, 'desk', cx, y0 + 0.38, dw, 0.66, 0, { mat: 'wood' });
+          add(room, 'monitor', cx, y0 + 0.22, 0.62, 0.12, 0, { mat: 'metal', elev: 0.78, h: 0.4 });
+          add(room, 'chair', cx, y0 + 1.05, 0.5, 0.5, Math.PI, { mat: 'fabric' });
+          add(room, 'bookshelf', x1 - 0.2, cy, Math.min(1.9, D * 0.55), 0.36, Math.PI / 2, { mat: 'wood' });
+          add(room, 'rug', cx, cy + 0.35, Math.min(2.3, W * 0.65), Math.min(1.6, D * 0.4), 0, { mat: 'rug', decor: true });
+        } else if (variant === 1) {
+          // Corner L-desk + reading chair
+          add(room, 'desk', x0 + 0.9, y0 + 0.35, 1.4, 0.6, 0, { mat: 'wood' });
+          add(room, 'desk', x0 + 0.35, y0 + 1.1, 0.6, 1.0, Math.PI / 2, { mat: 'wood' });
+          add(room, 'chair', x0 + 0.9, y0 + 0.9, 0.5, 0.5, Math.PI, { mat: 'fabric' });
+          add(room, 'bookshelf', x1 - 0.22, cy, Math.min(2.0, D * 0.6), 0.38, Math.PI / 2, { mat: 'wood' });
+          add(room, 'chair', x1 - 0.7, y1 - 0.7, 0.65, 0.65, -0.6, { mat: 'fabric', decor: true });
+          add(room, 'plant', x0 + 0.3, y1 - 0.3, 0.45, 0.45, 0, { mat: 'plant', decor: true });
+        } else {
+          // Dual workstation
+          const dw = Math.min(1.3, W * 0.4);
+          add(room, 'desk', cx - dw / 2 - 0.2, y0 + 0.38, dw, 0.65, 0, { mat: 'wood' });
+          add(room, 'chair', cx - dw / 2 - 0.2, y0 + 0.95, 0.48, 0.48, Math.PI, { mat: 'fabric' });
+          add(room, 'desk', cx + dw / 2 + 0.2, y0 + 0.38, dw, 0.65, 0, { mat: 'wood' });
+          add(room, 'chair', cx + dw / 2 + 0.2, y0 + 0.95, 0.48, 0.48, Math.PI, { mat: 'fabric' });
+          add(room, 'bookshelf', cx, y1 - 0.22, Math.min(2.2, W * 0.6), 0.38, Math.PI, { mat: 'wood' });
+        }
       } else if (type === 'balcony') {
         add(room, 'chair', cx - W * 0.18, cy - 0.15, 0.62, 0.62, -0.35, { mat: 'fabric' });
         add(room, 'chair', cx + W * 0.18, cy - 0.15, 0.62, 0.62, 0.35, { mat: 'fabric' });
@@ -860,40 +1113,80 @@
         add(room, 'boxes', x0 + 0.5, y1 - 0.45, 0.55, 0.55, 0, { mat: 'wood', decor: true });
         add(room, 'boxes', x0 + 1.15, y1 - 0.4, 0.45, 0.45, 0.2, { mat: 'wood', decor: true });
       } else {
-        // Living room. Wide rooms include a kitchenette and dining zone.
+        // Living room variations
         const wide = W > 7.2 && D > 3.0;
-        if (wide) {
-          const counterLen = Math.min(D - 1.1, 2.5);
-          add(room, 'counter', x0 + 0.32, cy, counterLen, 0.62, -Math.PI / 2, { mat: 'cabinet', variant: 'sink' });
-          add(room, 'upperCabinets', x0 + 0.19, cy, Math.max(1.0, counterLen - 0.4), 0.34, -Math.PI / 2, { mat: 'cabinet', elev: 1.5, h: 0.7 });
-          add(room, 'island', x0 + 1.5, cy, 1.15, 0.66, 0, { mat: 'cabinet', variant: 'stove' });
-          add(room, 'stool', x0 + 2.1, cy - 0.38, 0.36, 0.36, 0, { mat: 'wood' });
-          add(room, 'stool', x0 + 2.1, cy + 0.38, 0.36, 0.36, 0, { mat: 'wood' });
-          const tableX = x0 + 3.55;
-          if (tableX + 0.9 < x1 - 2.2) {
-            add(room, 'diningTable', tableX, cy, 1.38, 0.86, 0, { mat: 'wood' });
-            add(room, 'chair', tableX - 0.36, cy - 0.74, 0.44, 0.44, 0, { mat: 'wood' });
-            add(room, 'chair', tableX + 0.36, cy - 0.74, 0.44, 0.44, 0, { mat: 'wood' });
-            add(room, 'chair', tableX - 0.36, cy + 0.74, 0.44, 0.44, Math.PI, { mat: 'wood' });
-            add(room, 'chair', tableX + 0.36, cy + 0.74, 0.44, 0.44, Math.PI, { mat: 'wood' });
-            add(room, 'pendant', tableX, cy, 0.42, 0.42, 0, { mat: 'metal', elev: 2.05, h: 0.38, decor: true });
-          }
-        } else if (W > 4.4) {
-          add(room, 'diningTable', x0 + 1.15, cy, 1.4, 0.85, 0, { mat: 'wood' });
-          add(room, 'chair', x0 + 0.8, cy - 0.72, 0.44, 0.44, 0, { mat: 'wood' });
-          add(room, 'chair', x0 + 1.5, cy + 0.72, 0.44, 0.44, Math.PI, { mat: 'wood' });
-        }
 
-        const loungeCx = wide ? x1 - 1.45 : cx + (W > 4.4 ? 1.2 : 0);
-        const sofaW = clamp(W * 0.26, 1.75, 2.5);
-        const sofaY = y1 - 0.68;
-        add(room, 'rug', loungeCx, Math.max(y0 + 1.2, y1 - 1.7), Math.min(3.0, sofaW + 0.6), Math.min(2.0, D - 0.9), 0, { mat: 'rug' });
-        add(room, 'sofa', loungeCx, sofaY, sofaW, 0.92, Math.PI, { mat: 'fabric' });
-        add(room, 'coffeeTable', loungeCx, Math.max(y0 + 1.15, sofaY - 1.28), 1.05, 0.56, 0, { mat: 'wood' });
-        add(room, 'tvConsole', loungeCx, y0 + 0.27, Math.min(1.9, sofaW), 0.44, 0, { mat: 'wood' });
-        add(room, 'tv', loungeCx, y0 + 0.12, Math.min(1.35, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
-        add(room, 'plant', x0 + 0.3, y1 - 0.3, 0.5, 0.5, 0, { mat: 'plant', decor: true });
-        if (density > 1.1) add(room, 'floorLamp', x1 - 0.28, sofaY - 0.35, 0.4, 0.4, 0, { mat: 'metal', decor: true });
+        if (variant === 0) {
+          // Standard wide layout with kitchenette or dining zone
+          if (wide) {
+            const counterLen = Math.min(D - 1.1, 2.5);
+            add(room, 'counter', x0 + 0.32, cy, counterLen, 0.62, -Math.PI / 2, { mat: 'cabinet', variant: 'sink' });
+            add(room, 'upperCabinets', x0 + 0.19, cy, Math.max(1.0, counterLen - 0.4), 0.34, -Math.PI / 2, { mat: 'cabinet', elev: 1.5, h: 0.7 });
+            add(room, 'island', x0 + 1.5, cy, 1.15, 0.66, 0, { mat: 'cabinet', variant: 'stove' });
+            add(room, 'stool', x0 + 2.1, cy - 0.38, 0.36, 0.36, 0, { mat: 'wood' });
+            add(room, 'stool', x0 + 2.1, cy + 0.38, 0.36, 0.36, 0, { mat: 'wood' });
+            const tableX = x0 + 3.55;
+            if (tableX + 0.9 < x1 - 2.2) {
+              add(room, 'diningTable', tableX, cy, 1.38, 0.86, 0, { mat: 'wood' });
+              add(room, 'chair', tableX - 0.36, cy - 0.74, 0.44, 0.44, 0, { mat: 'wood' });
+              add(room, 'chair', tableX + 0.36, cy - 0.74, 0.44, 0.44, 0, { mat: 'wood' });
+              add(room, 'chair', tableX - 0.36, cy + 0.74, 0.44, 0.44, Math.PI, { mat: 'wood' });
+              add(room, 'chair', tableX + 0.36, cy + 0.74, 0.44, 0.44, Math.PI, { mat: 'wood' });
+              add(room, 'pendant', tableX, cy, 0.42, 0.42, 0, { mat: 'metal', elev: 2.05, h: 0.38, decor: true });
+            }
+          } else if (W > 4.4) {
+            add(room, 'diningTable', x0 + 1.15, cy, 1.4, 0.85, 0, { mat: 'wood' });
+            add(room, 'chair', x0 + 0.8, cy - 0.72, 0.44, 0.44, 0, { mat: 'wood' });
+            add(room, 'chair', x0 + 1.5, cy + 0.72, 0.44, 0.44, Math.PI, { mat: 'wood' });
+          }
+
+          const loungeCx = wide ? x1 - 1.45 : cx + (W > 4.4 ? 1.2 : 0);
+          const sofaW = clamp(W * 0.26, 1.75, 2.5);
+          const sofaY = y1 - 0.68;
+          add(room, 'rug', loungeCx, Math.max(y0 + 1.2, y1 - 1.7), Math.min(3.0, sofaW + 0.6), Math.min(2.0, D - 0.9), 0, { mat: 'rug' });
+          add(room, 'sofa', loungeCx, sofaY, sofaW, 0.92, Math.PI, { mat: 'fabric' });
+          add(room, 'coffeeTable', loungeCx, Math.max(y0 + 1.15, sofaY - 1.28), 1.05, 0.56, 0, { mat: 'wood' });
+          add(room, 'tvConsole', loungeCx, y0 + 0.27, Math.min(1.9, sofaW), 0.44, 0, { mat: 'wood' });
+          add(room, 'tv', loungeCx, y0 + 0.12, Math.min(1.35, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
+          add(room, 'plant', x0 + 0.3, y1 - 0.3, 0.5, 0.5, 0, { mat: 'plant', decor: true });
+          if (density > 1.1) add(room, 'floorLamp', x1 - 0.28, sofaY - 0.35, 0.4, 0.4, 0, { mat: 'metal', decor: true });
+        } else if (variant === 1) {
+          // Conversational dual-seating layout
+          const loungeCx = wide ? x1 - 1.6 : cx;
+          const sofaW = clamp(W * 0.24, 1.8, 2.3);
+          add(room, 'rug', loungeCx, cy, Math.min(3.2, sofaW + 0.8), Math.min(2.4, D * 0.65), 0, { mat: 'rug' });
+          add(room, 'sofa', loungeCx, cy + 0.9, sofaW, 0.88, Math.PI, { mat: 'fabric' });
+          add(room, 'coffeeTable', loungeCx, cy, 1.1, 0.6, 0, { mat: 'wood' });
+          add(room, 'chair', loungeCx - sofaW * 0.35, cy - 0.85, 0.68, 0.68, 0, { mat: 'fabric' });
+          add(room, 'chair', loungeCx + sofaW * 0.35, cy - 0.85, 0.68, 0.68, 0, { mat: 'fabric' });
+          add(room, 'tvConsole', x1 - 0.25, cy, 0.4, Math.min(1.8, D * 0.5), -Math.PI / 2, { mat: 'wood' });
+          add(room, 'plant', x0 + 0.35, y0 + 0.35, 0.55, 0.55, 0, { mat: 'plant', decor: true });
+          if (wide) {
+            add(room, 'diningTable', x0 + 1.8, cy, 1.5, 0.9, 0, { mat: 'wood' });
+            add(room, 'chair', x0 + 1.4, cy - 0.7, 0.45, 0.45, 0, { mat: 'wood' });
+            add(room, 'chair', x0 + 2.2, cy - 0.7, 0.45, 0.45, 0, { mat: 'wood' });
+            add(room, 'chair', x0 + 1.4, cy + 0.7, 0.45, 0.45, Math.PI, { mat: 'wood' });
+            add(room, 'chair', x0 + 2.2, cy + 0.7, 0.45, 0.45, Math.PI, { mat: 'wood' });
+          }
+        } else {
+          // L-shaped sectional sofa lounge layout
+          const loungeCx = wide ? x1 - 1.5 : cx;
+          const sofaW = clamp(W * 0.28, 2.0, 2.6);
+          add(room, 'rug', loungeCx - 0.2, cy, Math.min(3.0, sofaW + 0.5), Math.min(2.4, D * 0.6), 0, { mat: 'rug' });
+          // Main sofa
+          add(room, 'sofa', loungeCx, y1 - 0.65, sofaW, 0.9, Math.PI, { mat: 'fabric' });
+          // Return chaise / side sofa
+          add(room, 'sofa', loungeCx - sofaW / 2 + 0.4, cy + 0.2, 0.88, 1.25, -Math.PI / 2, { mat: 'fabric' });
+          add(room, 'coffeeTable', loungeCx + 0.2, cy + 0.2, 0.95, 0.55, 0, { mat: 'wood' });
+          add(room, 'tvConsole', loungeCx, y0 + 0.26, Math.min(2.0, sofaW), 0.42, 0, { mat: 'wood' });
+          add(room, 'floorLamp', loungeCx + sofaW / 2 + 0.2, y1 - 0.4, 0.4, 0.4, 0, { mat: 'metal', decor: true });
+          add(room, 'plant', x0 + 0.35, y1 - 0.35, 0.55, 0.55, 0, { mat: 'plant', decor: true });
+          if (wide) {
+            add(room, 'diningTable', x0 + 1.6, cy, 1.4, 0.85, 0, { mat: 'wood' });
+            add(room, 'chair', x0 + 1.6, cy - 0.7, 0.45, 0.45, 0, { mat: 'wood' });
+            add(room, 'chair', x0 + 1.6, cy + 0.7, 0.45, 0.45, Math.PI, { mat: 'wood' });
+          }
+        }
       }
     });
 

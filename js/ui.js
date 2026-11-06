@@ -25,7 +25,8 @@
     { tool: 'window', icon: 'window', label: 'Windows', key: 'N' },
     { tool: 'room', icon: 'layout', label: 'Rooms', key: 'R' },
     { sep: true },
-    { action: 'toggle-grid', icon: 'grid', label: 'Grid & snapping', key: '' },
+    { action: 'toggle-grid', icon: 'grid', label: 'Grid snapping', key: 'G' },
+    { action: 'toggle-ortho', icon: 'ortho', label: 'Straight wall & angle snap', key: 'A' },
     { action: 'toggle-dims', icon: 'ruler', label: 'Dimensions', key: '' },
     { sep: true },
     { action: 'step', step: 6, icon: 'light', label: 'Lighting & 3D', key: '' },
@@ -157,7 +158,8 @@
         if (t.sep) return '<div class="rail-sep"></div>';
         let active = false;
         if (t.tool) active = ui.tool === t.tool;
-        if (t.action === 'toggle-grid') active = !!e.showGrid;
+        if (t.action === 'toggle-grid') active = this.app.plan.settings.snapGrid !== false && (!e || e.gridSnap !== false);
+        if (t.action === 'toggle-ortho') active = this.app.plan.settings.snapAngle !== false;
         if (t.action === 'toggle-dims') active = !!this.app.plan.settings.showDims;
         if (t.action === 'step') active = ui.view3d && (ui.step === 6 || ui.step === 7);
         const attrs = t.action
@@ -456,7 +458,15 @@
             <div><b>${Math.round(seg.thickness * 100)}</b><span>thickness · cm</span></div>
             <div><b>${angle}°</b><span>bearing</span></div>
           </div>
-          <div class="sel-help">${seg.boundary ? 'Drag the wall or its corners in Outline mode to reshape it.' : 'Drag the wall to move it, or its round ends to stretch it.'}</div>
+          <div class="field" style="margin-top:10px;">
+            <label class="num-field"><span>Resize length</span><span class="num-wrap"><input type="number" data-wall-len="${seg.id}" min="0.5" max="30" step="0.05" value="${FC.fmt(seg.len, 2)}"><em>m</em></span></label>
+          </div>
+          <div class="btn-row two" style="margin-top:8px;">
+            <button class="btn soft sm" data-action="wall-add-door" data-wall="${seg.id}">${I('door')} Add door</button>
+            <button class="btn soft sm" data-action="wall-add-window" data-wall="${seg.id}">${I('window')} Add window</button>
+          </div>
+          ${!seg.boundary ? `<button class="btn soft sm" style="margin-top:6px;width:100%" data-action="wall-split" data-wall="${seg.id}">${I('sliders')} Split wall into two</button>` : ''}
+          <div class="sel-help" style="margin-top:8px;">${seg.boundary ? 'Drag the wall or its corners in Outline mode to reshape it.' : 'Drag the wall to move it, drag junction nodes to move connected walls together, or type an exact length above.'}</div>
           ${!seg.boundary ? `<button class="danger-link" data-action="delete-selection">${I('trash')} Delete wall</button>` : ''}
         </div>`;
       }
@@ -490,12 +500,58 @@
             ${op.kind === 'window' ? this.numField('Sill', 'opSill', 'sill', op.sill, 0, 2.2, 0.05) : ''}
           </div>
           ${op.kind === 'door'
-            ? `<div class="chip-row small">
+            ? `<div class="chip-row small" style="margin-top:8px;">
                 ${['single', 'double', 'sliding'].map((s) => `<button class="chip ${op.style === s ? 'active' : ''}" data-action="door-style" data-style="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
+              </div>
+              <div class="btn-row" style="margin-top:8px;">
+                <button class="btn soft sm" style="width:100%" data-action="flip-door" data-opening="${op.id}">${I('rotate3d')} Flip door swing</button>
               </div>`
             : ''}
-          <div class="sel-help">${op.kind === 'window' ? `Sill <b data-op-sill>${op.sill.toFixed(2)}</b> m · head <b data-op-head>${(op.sill + op.height).toFixed(2)}</b> m — both must stay below the <b data-op-wall>${this.app.plan.settings.wallHeight.toFixed(2)}</b> m wall.` : 'Drag the opening along the wall to reposition it.'}</div>
+          <div class="sel-help">${op.kind === 'window' ? `Sill <b data-op-sill>${op.sill.toFixed(2)}</b> m · head <b data-op-head>${(op.sill + op.height).toFixed(2)}</b> m — both must stay below the <b data-op-wall>${this.app.plan.settings.wallHeight.toFixed(2)}</b> m wall.` : 'Drag the opening along the wall to reposition it. Click Del badge to remove.'}</div>
           <button class="danger-link" data-action="delete-selection">${I('trash')} Delete ${label.toLowerCase()}</button>
+        </div>`;
+      }
+      if (sel.type === 'furniture') {
+        const f = (this.app.furniture || []).find((item) => item.id === sel.id);
+        if (!f) return '';
+        const rotDeg = Math.round((((f.rot || 0) * 180) / Math.PI + 360) % 360);
+        return `<div class="sel-card">
+          <div class="sel-head">
+            <div><span class="eyebrow">Selected</span><div class="sel-title">${esc(f.name || f.kind[0].toUpperCase() + f.kind.slice(1))}</div></div>
+            <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
+          </div>
+          <div class="sel-metrics two">
+            <div><b>${FC.fmt(f.w, 2)} × ${FC.fmt(f.d, 2)}</b><span>size · m</span></div>
+            <div><b>${rotDeg}°</b><span>rotation</span></div>
+          </div>
+          <div class="btn-row two" style="margin-top:10px;">
+            <button class="btn soft sm" data-action="rotate-furniture" data-furniture="${f.id}">${I('rotate3d')} Rotate 90°</button>
+            <button class="btn soft sm danger" data-action="delete-selection">${I('trash')} Delete</button>
+          </div>
+          <div class="sel-help" style="margin-top:8px;">Drag to reposition anywhere in the room. Drag the round top handle to rotate freely, or press <kbd>R</kbd>.</div>
+        </div>`;
+      }
+      if (sel.type === 'light') {
+        const l = (this.app.plan.lights || []).find((item) => item.id === sel.id);
+        if (!l) return '';
+        const title = l.type === 'spot' ? 'Ceiling spotlight' : l.type === 'lamp' ? 'Floor lamp' : 'Ceiling fixture';
+        return `<div class="sel-card">
+          <div class="sel-head">
+            <div><span class="eyebrow">Selected</span><div class="sel-title">${title}</div></div>
+            <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
+          </div>
+          <div class="field" style="margin-top:10px;">
+            <div class="field-head"><span>Brightness</span><span class="value">${Math.round((l.intensity || 1) * 100)}%</span></div>
+            <input type="range" data-light-intensity="${l.id}" min="0.2" max="2.5" step="0.1" value="${l.intensity || 1}">
+          </div>
+          <div class="sel-metrics two" style="margin-top:8px;">
+            <div><b>${FC.fmt(l.x, 2)}, ${FC.fmt(l.y, 2)}</b><span>pos · m</span></div>
+            <div><b>${FC.fmt(l.z || 2.4, 2)}</b><span>height · m</span></div>
+          </div>
+          <div class="btn-row" style="margin-top:10px;">
+            <button class="btn soft sm danger" style="width:100%" data-action="delete-selection">${I('trash')} Delete light</button>
+          </div>
+          <div class="sel-help" style="margin-top:8px;">Drag to position this light fixture. It casts real dynamic light in 3D dollhouse mode.</div>
         </div>`;
       }
       if (sel.type === 'room') {
@@ -646,9 +702,15 @@
     }
 
     lightingStepHTML() {
+      const lights = this.app.plan.lights || [];
       return `<section class="panel-block">
-        ${this.moduleHead('Lighting', 'Live scene')}
-        <p class="helper">Dial in the sun, then explore the model. Changes apply instantly.</p>
+        ${this.moduleHead('Lighting & Sun', lights.length + ' fixtures placed')}
+        <p class="helper">Add interior lights or dial in the sun. Position lights in 2D or 3D dollhouse mode.</p>
+        <div class="btn-row two" style="margin-bottom:12px;">
+          <button class="btn soft sm" data-action="add-light" data-light-type="ceiling">${I('sun')} + Ceiling Light</button>
+          <button class="btn soft sm" data-action="add-light" data-light-type="lamp">${I('sun')} + Floor Lamp</button>
+        </div>
+        <button class="btn soft sm" style="width:100%;margin-bottom:14px;" data-action="add-light" data-light-type="spot">${I('sun')} + Spot Light</button>
         ${this.sunControlHTML()}
       </section>`;
     }
@@ -661,6 +723,10 @@
         <div class="btn-row two">
           <button class="btn soft sm" data-action="camera-fit">${I('expand')} Fit</button>
           <button class="btn soft sm" data-action="camera-top">${I('grid')} Top view</button>
+        </div>
+        <div class="btn-row two" style="margin-top:10px;">
+          <button class="btn primary sm" data-action="export-glb">${I('download')} Export .glb</button>
+          <button class="btn soft sm" data-action="export-dwg">${I('download')} Export CAD</button>
         </div>
         ${this.sunControlHTML()}
       </section>`;
@@ -684,11 +750,13 @@
 
     viewTogglesHTML() {
       const v = this.app.plan.view;
+      const s = this.app.plan.settings;
       return `<div class="toggle-list">
         ${this.toggleRow('toggle-xray', 'X-ray walls', 'eye', !!v.xray)}
         ${this.toggleRow('toggle-ceiling', 'Ceiling', 'ceiling', !!v.ceiling)}
         ${this.toggleRow('toggle-furniture', 'Furniture', 'sofa', !!this.app.plan.furnished)}
         ${this.toggleRow('toggle-autorotate', 'Turntable', 'rotate3d', !!v.autoRotate)}
+        ${this.toggleRow('toggle-invert-pitch', 'Flip vertical mouse look', 'rotate', s.invertPitch ?? true)}
       </div>`;
     }
 
@@ -741,6 +809,10 @@
               </button>`;
             })
             .join('')}
+        </div>
+        <div class="toggle-list" style="margin-top:10px;">
+          ${this.toggleRow('toggle-grid', 'Snap to grid (0.1m)', 'grid', s.snapGrid !== false)}
+          ${this.toggleRow('toggle-ortho', 'Straight wall snap (0°, 90°, 45°)', 'ortho', s.snapAngle !== false)}
         </div>
         <details class="structure" ${this.structureOpen ? 'open' : ''}>
           <summary><span>${I('sliders')} Structure & openings</span>${I('chevron-down', 'chev')}</summary>
@@ -865,6 +937,23 @@
         this.syncWindowReadouts();
         return;
       }
+      if (el.dataset && el.dataset.wallLen) {
+        this.ensureHistory(el);
+        const value = parseFloat(el.value);
+        if (isFinite(value) && value > 0.1) {
+          this.app.resizeWall(el.dataset.wallLen, value);
+        }
+        return;
+      }
+      if (el.dataset && el.dataset.lightIntensity) {
+        this.ensureHistory(el);
+        const value = parseFloat(el.value);
+        if (isFinite(value)) {
+          this.app.updateLight(el.dataset.lightIntensity, { intensity: value });
+          this.paintRanges(document);
+        }
+        return;
+      }
     }
 
     onChange(e) {
@@ -889,12 +978,10 @@
           app.setTool(el.dataset.tool);
           break;
         case 'toggle-grid':
-          if (app.editor) {
-            app.editor.showGrid = !app.editor.showGrid;
-            app.editor.draw();
-          }
-          this.renderToolrail();
-          this.toast(app.editor && app.editor.showGrid ? 'Grid and snapping on' : 'Grid and snapping off', 'info');
+          app.toggleGridSnap();
+          break;
+        case 'toggle-ortho':
+          app.toggleOrthoSnap();
           break;
         case 'toggle-dims':
           app.plan.settings.showDims = !app.plan.settings.showDims;
@@ -978,6 +1065,33 @@
         case 'camera-top':
           app.viewer.topView();
           break;
+        case 'wall-add-door':
+          app.placeDoorAt(el.dataset.wall);
+          break;
+        case 'wall-add-window':
+          app.placeWindowAt(el.dataset.wall);
+          break;
+        case 'wall-split':
+          app.splitWallAt(el.dataset.wall);
+          break;
+        case 'flip-door':
+          app.flipDoor();
+          break;
+        case 'rotate-furniture':
+          app.rotateSelectedFurniture(Math.PI / 2);
+          break;
+        case 'add-light':
+          app.addLightAt(null, null, el.dataset.lightType || 'ceiling');
+          break;
+        case 'export-glb':
+          app.exportGLB();
+          break;
+        case 'export-dwg':
+          app.exportDWG();
+          break;
+        case 'import-dwg':
+          app.importDWG();
+          break;
         case 'screenshot':
           app.screenshot3D();
           break;
@@ -992,6 +1106,9 @@
           break;
         case 'toggle-autorotate':
           app.toggleView('autoRotate');
+          break;
+        case 'toggle-invert-pitch':
+          app.toggleInvertPitch();
           break;
         case 'sun-preset':
           app.setSunTime(parseFloat(el.dataset.hour));
@@ -1046,6 +1163,46 @@
       this._menu = menu;
     }
 
+    openContextMenu(x, y, items) {
+      this.closeMenus();
+      const root = this.els.menuRoot;
+      const menu = document.createElement('div');
+      menu.className = 'menu';
+      const width = 230;
+      let left = x;
+      let top = y;
+      if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12;
+      if (top + 240 > window.innerHeight - 12) top = Math.max(12, window.innerHeight - 260);
+      menu.style.top = Math.max(12, Math.round(top)) + 'px';
+      menu.style.left = Math.max(12, Math.round(left)) + 'px';
+      menu.style.width = width + 'px';
+
+      items.forEach((item) => {
+        if (item.separator) {
+          const sep = document.createElement('div');
+          sep.className = 'menu-sep';
+          menu.appendChild(sep);
+          return;
+        }
+        const btn = document.createElement('button');
+        btn.className = 'menu-item' + (item.danger ? ' danger' : '') + (item.checked ? ' checked' : '') + (item.disabled ? ' disabled' : '');
+        btn.disabled = !!item.disabled;
+        btn.innerHTML = `<span class="menu-ico">${I(item.icon || 'file')}</span>
+          <span class="menu-label">${item.labelHTML || esc(item.label)}</span>
+          ${item.shortcut ? `<span class="menu-short">${item.shortcut}</span>` : ''}
+          ${item.checked ? `<span class="menu-check">${I('check')}</span>` : ''}
+          ${item.hint ? `<span class="menu-hint">${item.hint}</span>` : ''}`;
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          this.closeMenus();
+          if (typeof item.action === 'function') item.action();
+        });
+        menu.appendChild(btn);
+      });
+      root.appendChild(menu);
+      this._menu = menu;
+    }
+
     closeMenus() {
       if (this._menu) {
         this._menu.remove();
@@ -1068,6 +1225,8 @@
       items.push({ separator: true });
       items.push({ label: 'Import plan…', icon: 'upload', action: () => app.importJSON() });
       items.push({ label: 'Export plan', icon: 'download', action: () => app.exportJSON() });
+      items.push({ label: 'Export CAD (.dwg/.dxf)', icon: 'download', action: () => app.exportDWG() });
+      items.push({ label: 'Import CAD (.dwg/.dxf)…', icon: 'upload', action: () => app.importDWG() });
       items.push({ separator: true });
       items.push({ label: 'Delete plan', icon: 'trash', danger: true, action: () => this.deletePlan() });
       this.openMenu(anchor, items);
@@ -1080,6 +1239,10 @@
         [
           { label: 'Fit plan to screen', icon: 'expand', shortcut: 'F', action: () => app.fit(1) },
           { label: 'Toggle dimensions', icon: 'ruler', action: () => app.toggleDimensions() },
+          { separator: true },
+          { label: 'Export 3D Model (.glb)', icon: 'download', action: () => app.exportGLB() },
+          { label: 'Export CAD (.dwg / .dxf)', icon: 'download', action: () => app.exportDWG() },
+          { label: 'Import CAD (.dwg / .dxf)…', icon: 'upload', action: () => app.importDWG() },
           { separator: true },
           { label: 'Save plan image', icon: 'camera', action: () => app.exportPNG() },
           { label: 'Export plan (.json)', icon: 'download', action: () => app.exportJSON() },
