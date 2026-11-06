@@ -35,7 +35,7 @@
   class UI {
     constructor(app) {
       this.app = app;
-      this.sidebarOpen = true;
+      this.sidebarOpen = window.innerWidth > 700;
       this.welcomeDismissed = false;
       this.structureOpen = false;
       this._activeSetting = null;
@@ -494,7 +494,7 @@
                 ${['single', 'double', 'sliding'].map((s) => `<button class="chip ${op.style === s ? 'active' : ''}" data-action="door-style" data-style="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
               </div>`
             : ''}
-          <div class="sel-help">${op.kind === 'window' ? 'Sill + height must fit below the wall height.' : 'Drag the opening along the wall to reposition it.'}</div>
+          <div class="sel-help">${op.kind === 'window' ? `Sill ${op.sill.toFixed(2)} m · head <b data-op-head>${(op.sill + op.height).toFixed(2)}</b> m — both must stay below the ${this.app.plan.settings.wallHeight.toFixed(2)} m wall.` : 'Drag the opening along the wall to reposition it.'}</div>
           <button class="danger-link" data-action="delete-selection">${I('trash')} Delete ${label.toLowerCase()}</button>
         </div>`;
       }
@@ -623,7 +623,8 @@
         </div>
         <p class="helper tight">${tool === 'window' ? 'Click a wall to place a window. Sill and head heights are configurable below.' : tool === 'opening' ? 'Click a wall to cut an open archway between two spaces.' : 'Click a wall to place a door. Drag it along the wall to slide it.'}</p>
         ${tool === 'window'
-          ? `<div class="num-grid">${this.numField('Width', null, 'windowWidth', plan.settings.windowWidth, 0.6, 4, 0.05)}${this.numField('Sill', null, 'windowSill', plan.settings.windowSill, 0, 2.2, 0.05)}${this.numField('Height', null, 'windowHeight', plan.settings.windowHeight, 0.3, 2.6, 0.05)}</div>`
+          ? `<div class="num-grid">${this.numField('Width', null, 'windowWidth', plan.settings.windowWidth, 0.6, 4, 0.05)}${this.numField('Sill', null, 'windowSill', plan.settings.windowSill, 0, 2.2, 0.05)}${this.numField('Height', null, 'windowHeight', plan.settings.windowHeight, 0.3, 2.6, 0.05)}</div>
+             <div class="hint-note small">${I('info')} Sill <b data-window-sill>${plan.settings.windowSill.toFixed(2)}</b> m → head <b data-window-head>${(plan.settings.windowSill + plan.settings.windowHeight).toFixed(2)}</b> m.</div>`
           : tool === 'opening'
             ? ''
             : `<div class="num-grid">${this.numField('Width', null, 'doorWidth', plan.settings.doorWidth, 0.6, 2.4, 0.05)}${this.numField('Height', null, 'doorHeight', plan.settings.doorHeight, 1.8, 3, 0.05)}</div>`}
@@ -764,7 +765,7 @@
 
     numField(label, suffix, key, value, min, max, step) {
       const settingKey = suffix ? null : key;
-      const opField = suffix ? String(suffix).replace(/^op/i, '') || key : null;
+      const opField = suffix ? String(suffix).replace(/^op/i, '').toLowerCase() || key : null;
       const attrs = opField
         ? `data-op-field="${opField}"`
         : `data-setting="${settingKey}"`;
@@ -781,6 +782,19 @@
         const pct = FC.clamp(((v - min) / (max - min)) * 100, 0, 100);
         el.style.setProperty('--pct', pct + '%');
       });
+    }
+
+    syncWindowReadouts() {
+      const s = this.app.plan.settings;
+      document.querySelectorAll('[data-window-sill]').forEach((n) => (n.textContent = s.windowSill.toFixed(2)));
+      document.querySelectorAll('[data-window-head]').forEach((n) => (n.textContent = (s.windowSill + s.windowHeight).toFixed(2)));
+      const sel = this.app.ui.selection;
+      if (sel && sel.type === 'opening') {
+        const op = this.app.plan.openings.find((o) => o.id === sel.id);
+        if (op && op.kind === 'window') {
+          document.querySelectorAll('[data-op-head]').forEach((n) => (n.textContent = (op.sill + op.height).toFixed(2)));
+        }
+      }
     }
 
     /* ---------------------------------------------------------------- */
@@ -817,6 +831,7 @@
           node.textContent = (key === 'wallHeight' ? value.toFixed(2) : value.toFixed(2)) + (key === 'wallHeight' || unit ? ' m' : '');
         });
         this.paintRanges(document);
+        this.syncWindowReadouts();
         return;
       }
       if (el.dataset && el.dataset.sun !== undefined) {
@@ -845,6 +860,7 @@
         const value = parseFloat(el.value);
         if (!isFinite(value)) return;
         this.app.updateSelectedOpening(el.dataset.opField, value);
+        this.syncWindowReadouts();
         return;
       }
     }

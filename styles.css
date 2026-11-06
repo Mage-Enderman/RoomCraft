@@ -535,13 +535,14 @@ body.mode-3d .toolrail {
   box-shadow: var(--shadow-panel), inset 0 1px 0 rgba(255, 255, 255, 0.055);
   color: var(--text);
   transition: transform 0.34s var(--ease), opacity 0.24s ease;
-  animation: sidebar-in 0.6s var(--ease) 0.1s both;
+  animation: sidebar-in 0.6s var(--ease) 0.1s backwards;
 }
 
 .sidebar.collapsed {
   pointer-events: none;
   opacity: 0;
   transform: translateX(calc(100% + 32px));
+  animation: none;
 }
 
 .side-scroll {
