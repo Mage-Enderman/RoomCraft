@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f5f5f6" />
+  <title>Floorcraft — sketch a plan, walk it in 3D</title>
+  <meta name="description" content="Draw a floor plan, furnish it and explore it in 3D. Wall heights, doors, windows and materials are fully configurable." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%235b4bf6'/%3E%3Cpath d='M18 31l14-12 14 12v17H18z' fill='none' stroke='white' stroke-width='4' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="plan" aria-label="2D floor plan editor"></canvas>
+
+    <div id="viewerWrap" class="viewer-wrap" aria-hidden="true">
+      <canvas id="viewer3d" aria-label="3D view of the floor plan"></canvas>
+      <div class="viewer-badge" id="viewerBadge">
+        <span class="dot-live"></span><span>Live 3D</span>
+      </div>
+    </div>
+
+    <header class="topbar">
+      <div class="tb-left">
+        <div class="brand chip-dark" title="Floorcraft">
+          <div class="brand-mark" data-icon="home"></div>
+          <span class="brand-name">Floorcraft</span>
+          <span class="brand-beta">Beta</span>
+        </div>
+
+        <button class="project-chip chip-dark" id="projectBtn" data-action="project-menu" title="Project menu">
+          <span class="ico sm" data-icon="grid"></span>
+          <span class="project-name" id="projectName">My first floor plan</span>
+          <span class="ico xs muted" data-icon="chevron-down"></span>
+        </button>
+
+        <div class="save-chip" id="saveChip" title="Your plan is saved locally">
+          <span class="ico sm save-ico" data-icon="check"></span>
+          <span id="saveText">Saved</span>
+        </div>
+      </div>
+
+      <nav class="stepper chip-dark" id="stepper" aria-label="Workflow steps"></nav>
+
+      <div class="tb-right">
+        <div class="seg chip-dark">
+          <button class="icon-btn" id="undoBtn" data-action="undo" title="Undo (Ctrl+Z)" disabled>
+            <span class="ico" data-icon="undo"></span>
+          </button>
+          <button class="icon-btn" id="redoBtn" data-action="redo" title="Redo (Ctrl+Shift+Z)" disabled>
+            <span class="ico" data-icon="redo"></span>
+          </button>
+        </div>
+        <button class="icon-btn square chip-dark" data-action="toggle-sidebar" title="Toggle side panel">
+          <span class="ico" data-icon="panel"></span>
+        </button>
+        <button class="icon-btn square chip-dark" data-action="more-menu" title="More">
+          <span class="ico" data-icon="more"></span>
+        </button>
+        <button class="avatar" data-action="help" title="Help & shortcuts" aria-label="Help and shortcuts">M</button>
+      </div>
+    </header>
+
+    <aside class="toolrail chip-dark" id="toolrail" aria-label="Drawing tools"></aside>
+
+    <aside class="sidebar" id="sidebar" aria-label="Plan settings">
+      <div class="side-scroll" id="sideScroll"></div>
+    </aside>
+
+    <button class="sidebar-reopen chip-dark" id="sidebarReopen" data-action="toggle-sidebar" title="Open side panel">
+      <span class="ico" data-icon="panel"></span>
+    </button>
+
+    <section class="welcome" id="welcome" aria-label="Welcome">
+      <button class="welcome-close icon-btn" data-action="dismiss-welcome" title="Close">
+        <span class="ico sm" data-icon="close"></span>
+      </button>
+      <div class="welcome-mark" data-icon="home"></div>
+      <h1>Sketch an apartment in minutes</h1>
+      <p>Click to trace the outer walls, split it into rooms, drop doors — then generate windows and a fully furnished interior. One more click and it&rsquo;s 3D.</p>
+      <div class="welcome-actions">
+        <button class="btn primary" data-action="start-drawing">
+          <span class="ico" data-icon="home"></span> Start drawing
+        </button>
+        <button class="btn ghost" data-action="load-sample">
+          <span class="ico" data-icon="layout"></span> Try a sample
+        </button>
+      </div>
+      <div class="welcome-steps">
+        <span><b>1</b> Outline</span><i></i><span><b>2</b> Walls</span><i></i><span><b>3</b> Rooms</span><i></i><span><b>4</b> Doors</span><i></i><span><b>5</b> Generate</span><i></i><span><b>6</b> 3D</span>
+      </div>
+    </section>
+
+    <div class="zoombar chip-dark" id="zoombar">
+      <button class="icon-btn" data-action="zoom-out" title="Zoom out">
+        <span class="ico sm" data-icon="minus"></span>
+      </button>
+      <button class="zoom-value" id="zoomValue" data-action="fit" title="Fit plan to screen">100%</button>
+      <button class="icon-btn" data-action="zoom-in" title="Zoom in">
+        <span class="ico sm" data-icon="plus"></span>
+      </button>
+      <span class="zoom-sep"></span>
+      <button class="icon-btn" data-action="fit" title="Fit plan to screen">
+        <span class="ico sm" data-icon="expand"></span>
+      </button>
+    </div>
+
+    <div class="statuspill" id="statusHint" aria-live="polite"></div>
+
+    <button class="help-float chip-dark" data-action="help" title="Help & keyboard shortcuts">
+      <span class="ico" data-icon="help"></span>
+    </button>
+
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+    <div class="menu-root" id="menuRoot"></div>
+    <div class="modal-root" id="modalRoot"></div>
+
+    <div class="loading3d" id="loading3d" aria-hidden="true">
+      <div class="loading-card">
+        <div class="spinner"></div>
+        <div>
+          <strong>Building your 3D home</strong>
+          <span>Extruding walls, cutting openings…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <noscript>Floorcraft needs JavaScript to draw and render your plan.</noscript>
+
+  <script src="vendor/three.min.js"></script>
+  <script src="js/icons.js"></script>
+  <script src="js/model.js"></script>
+  <script src="js/furniture3d.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/viewer3d.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
