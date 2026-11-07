@@ -378,6 +378,281 @@
         box(g, (w - 0.08) * 0.28, 0.025, 0.004, material(frameCol, 0.8), -0.06, elev + item.h / 2 - 0.06, 0.023);
         break;
       }
+      case 'sectionalSofa': {
+        const seatD = Math.min(0.88, d * 0.55);
+        const chaiseW = Math.min(0.95, w * 0.45);
+        // Main base & back
+        box(g, w, 0.24, seatD, fabric, 0, 0.16, -d / 2 + seatD / 2);
+        box(g, w, 0.72, 0.22, fabric, 0, 0.52, -d / 2 + 0.11);
+        // Chaise extension
+        box(g, chaiseW, 0.24, d - seatD, fabric, -w / 2 + chaiseW / 2, 0.16, d / 2 - (d - seatD) / 2);
+        // Armrests
+        box(g, 0.18, 0.52, seatD, fabric, w / 2 - 0.09, 0.42, -d / 2 + seatD / 2);
+        box(g, 0.18, 0.52, d - seatD, fabric, -w / 2 + 0.09, 0.42, d / 2 - (d - seatD) / 2);
+        // Cushions
+        box(g, w - chaiseW - 0.2, 0.14, seatD - 0.24, linen, chaiseW / 2, 0.35, -d / 2 + seatD / 2);
+        box(g, chaiseW - 0.2, 0.14, d - 0.24, linen, -w / 2 + chaiseW / 2, 0.35, 0);
+        legs(g, w, d, 0.1, wood, 0.12);
+        break;
+      }
+      case 'armchair': {
+        box(g, w, 0.24, d, fabric, 0, 0.16, 0);
+        box(g, w, 0.72, 0.20, fabric, 0, 0.52, -d / 2 + 0.1);
+        [-1, 1].forEach((s) => {
+          box(g, 0.16, 0.52, d, fabric, s * (w / 2 - 0.08), 0.42, 0);
+        });
+        box(g, w - 0.34, 0.14, d - 0.22, linen, 0, 0.35, 0.02);
+        legs(g, w, d, 0.1, wood, 0.08);
+        break;
+      }
+      case 'fireplace': {
+        box(g, w, item.h, d, stone, 0, item.h / 2, 0);
+        box(g, w + 0.08, 0.05, d + 0.06, wood, 0, item.h + 0.025, 0);
+        box(g, w * 0.65, item.h * 0.55, 0.04, dark, 0, item.h * 0.45, d / 2 + 0.005);
+        const fireMat = material('#ff6a00', 0.2, 0, { emissive: new THREE.Color('#ff5500'), emissiveIntensity: 2.0 });
+        box(g, w * 0.55, 0.08, 0.12, fireMat, 0, item.h * 0.24, d / 2 - 0.04);
+        break;
+      }
+      case 'car': {
+        const bodyCol = pal.accent || '#3b5998';
+        const bodyMat = material(bodyCol, 0.3, 0.4);
+        const glassMat = material('#1a2634', 0.1, 0.9);
+        const wheelMat = material('#1c1c1f', 0.8, 0.2);
+        box(g, w, 0.48, d, bodyMat, 0, 0.42, 0);
+        box(g, w * 0.88, 0.46, d * 0.52, glassMat, 0, 0.86, -d * 0.04);
+        box(g, w * 0.84, 0.04, d * 0.48, bodyMat, 0, 1.10, -d * 0.04);
+        [-1, 1].forEach((s) => {
+          box(g, 0.32, 0.12, 0.04, material('#fff3d6', 0.1, 0, { emissive: new THREE.Color('#fff3d6'), emissiveIntensity: 1.2 }), s * (w * 0.35), 0.46, d / 2 + 0.01);
+          box(g, 0.32, 0.12, 0.04, material('#e63946', 0.2, 0, { emissive: new THREE.Color('#cc0000'), emissiveIntensity: 1.0 }), s * (w * 0.35), 0.46, -d / 2 - 0.01);
+        });
+        [-1, 1].forEach((sx) => {
+          [-1, 1].forEach((sz) => {
+            cyl(g, 0.32, 0.32, 0.18, wheelMat, sx * (w / 2 + 0.02), 0.32, sz * (d * 0.32), 16, { rz: Math.PI / 2 });
+          });
+        });
+        break;
+      }
+      case 'workbench': {
+        box(g, w, 0.08, d, material('#9c7a4c', 0.65), 0, item.h - 0.04, 0);
+        legs(g, w, d, item.h - 0.08, dark, 0.06);
+        box(g, w - 0.14, 0.03, d - 0.14, metal, 0, 0.25, 0);
+        box(g, w, 0.65, 0.03, material('#45484d', 0.8), 0, item.h + 0.325, -d / 2 + 0.015);
+        break;
+      }
+      case 'toolCabinet': {
+        const redChest = material('#a82020', 0.4, 0.4);
+        box(g, w, item.h, d, redChest, 0, item.h / 2, 0);
+        const drawers = 5;
+        for (let i = 0; i < drawers; i++) {
+          box(g, w - 0.06, item.h / drawers - 0.04, 0.015, metal, 0, (item.h / drawers) * (i + 0.5), d / 2 + 0.008);
+          box(g, w * 0.4, 0.02, 0.025, dark, 0, (item.h / drawers) * (i + 0.5), d / 2 + 0.02);
+        }
+        [-1, 1].forEach((sx) => {
+          [-1, 1].forEach((sz) => {
+            cyl(g, 0.04, 0.04, 0.04, dark, sx * (w / 2 - 0.08), 0.04, sz * (d / 2 - 0.08), 8);
+          });
+        });
+        break;
+      }
+      case 'garageShelving': {
+        [-1, 1].forEach((sx) => {
+          [-1, 1].forEach((sz) => {
+            box(g, 0.05, item.h, 0.05, metal, sx * (w / 2 - 0.03), item.h / 2, sz * (d / 2 - 0.03));
+          });
+        });
+        const shelves = 5;
+        for (let i = 0; i < shelves; i++) {
+          const sy = (item.h / (shelves - 0.3)) * (i + 0.2);
+          box(g, w, 0.03, d, metal, 0, sy, 0);
+          if (i > 0 && i < 4) {
+            box(g, w * 0.35, 0.24, d * 0.65, material('#2b3d4f', 0.8), (i % 2 === 0 ? 1 : -1) * w * 0.2, sy + 0.13, 0);
+          }
+        }
+        break;
+      }
+      case 'bicycle': {
+        const bikeFrame = material('#e65100', 0.4, 0.5);
+        [-1, 1].forEach((s) => {
+          cyl(g, 0.32, 0.32, 0.04, dark, 0, 0.32, s * (d * 0.35), 16, { rx: Math.PI / 2 });
+          cyl(g, 0.28, 0.28, 0.02, metal, 0, 0.32, s * (d * 0.35), 16, { rx: Math.PI / 2 });
+        });
+        box(g, 0.04, 0.04, d * 0.65, bikeFrame, 0, 0.58, 0);
+        box(g, 0.04, 0.45, 0.04, bikeFrame, 0, 0.55, -d * 0.05, { rx: 0.2 });
+        box(g, 0.42, 0.03, 0.04, dark, 0, 0.95, d * 0.3);
+        box(g, 0.14, 0.04, 0.24, dark, 0, 0.82, -d * 0.1);
+        break;
+      }
+      case 'washer':
+      case 'dryer': {
+        const isDryer = item.kind === 'dryer';
+        box(g, w, item.h, d, metal, 0, item.h / 2, 0);
+        box(g, w - 0.04, 0.14, 0.02, dark, 0, item.h - 0.09, d / 2 + 0.01);
+        cyl(g, 0.03, 0.03, 0.02, metal, -w * 0.25, item.h - 0.09, d / 2 + 0.025, 12, { rx: Math.PI / 2 });
+        cyl(g, w * 0.28, w * 0.28, 0.03, material(isDryer ? '#3a444a' : '#22323d', 0.2, 0.6), 0, item.h * 0.45, d / 2 + 0.015, 20, { rx: Math.PI / 2 });
+        cyl(g, w * 0.22, w * 0.22, 0.04, material('#0f171d', 0.1, 0.8), 0, item.h * 0.45, d / 2 + 0.015, 20, { rx: Math.PI / 2 });
+        break;
+      }
+      case 'laundrySink': {
+        box(g, w, item.h - 0.06, d, cabinet, 0, (item.h - 0.06) / 2, 0);
+        box(g, w + 0.02, 0.06, d + 0.02, stone, 0, item.h - 0.03, 0);
+        box(g, w * 0.75, 0.35, d * 0.7, material('#f5f5f5', 0.3), 0, item.h - 0.2, 0);
+        cyl(g, 0.018, 0.018, 0.35, metal, 0, item.h + 0.175, -d * 0.3);
+        break;
+      }
+      case 'ironingBoard': {
+        box(g, w, 0.04, d, fabric, 0, item.h, 0);
+        box(g, w * 0.25, 0.038, d * 0.6, fabric, w * 0.45, item.h, 0);
+        [-1, 1].forEach((s) => {
+          box(g, 0.03, item.h, 0.03, metal, s * (w * 0.22), item.h / 2, 0, { rz: s * 0.35 });
+        });
+        break;
+      }
+      case 'patioTable': {
+        box(g, w, 0.05, d, wood, 0, item.h - 0.025, 0);
+        legs(g, w, d, item.h - 0.05, dark, 0.06);
+        cyl(g, 0.025, 0.025, 0.06, dark, 0, item.h - 0.025, 0, 10);
+        break;
+      }
+      case 'patioChair': {
+        box(g, w, 0.05, d, wood, 0, 0.44, 0);
+        box(g, w, 0.42, 0.04, wood, 0, 0.66, -d / 2 + 0.02);
+        legs(g, w, d, 0.42, dark, 0.05);
+        break;
+      }
+      case 'sunLounger': {
+        box(g, w, 0.12, d, wood, 0, 0.18, 0);
+        legs(g, w, d, 0.12, dark, 0.06);
+        box(g, w - 0.06, 0.08, d * 0.65, fabric, 0, 0.28, d * 0.12);
+        box(g, w - 0.06, 0.08, d * 0.32, fabric, 0, 0.42, -d * 0.32, { rx: -0.38 });
+        break;
+      }
+      case 'parasol': {
+        cyl(g, 0.24, 0.26, 0.08, dark, 0, 0.04, 0, 16);
+        cyl(g, 0.024, 0.024, item.h, metal, 0, item.h / 2, 0);
+        cyl(g, 0.08, w * 0.5, 0.42, material(pal.linen, 0.9), 0, item.h - 0.1, 0, 8);
+        break;
+      }
+      case 'bbq': {
+        const grillBody = material('#202224', 0.4, 0.5);
+        box(g, w * 0.6, 0.52, d * 0.8, grillBody, 0, 0.42, 0);
+        legs(g, w * 0.6, d * 0.8, 0.25, dark, 0.04);
+        cyl(g, d * 0.36, d * 0.38, w * 0.58, grillBody, 0, 0.82, 0, 16, { rz: Math.PI / 2 });
+        box(g, 0.35, 0.03, 0.05, metal, 0, 0.88, d * 0.34);
+        [-1, 1].forEach((s) => {
+          box(g, 0.28, 0.03, d * 0.7, metal, s * (w * 0.42), 0.68, 0);
+        });
+        break;
+      }
+      case 'planterBox': {
+        box(g, w, item.h, d, wood, 0, item.h / 2, 0);
+        box(g, w - 0.06, 0.03, d - 0.06, dark, 0, item.h - 0.02, 0);
+        const foliageMat = material('#4d6b42', 0.9);
+        const bushes = Math.max(2, Math.round(w / 0.35));
+        for (let i = 0; i < bushes; i++) {
+          const bx = -w / 2 + (w / bushes) * (i + 0.5);
+          sphere(g, 0.16 + ((i * 17) % 3) * 0.03, foliageMat, bx, item.h + 0.12, 0, 10);
+        }
+        break;
+      }
+      case 'ovenRange': {
+        box(g, w, item.h, d, metal, 0, item.h / 2, 0);
+        box(g, w - 0.1, 0.45, 0.02, material('#101215', 0.2, 0.8), 0, 0.44, d / 2 + 0.012);
+        box(g, w * 0.7, 0.025, 0.035, metal, 0, 0.68, d / 2 + 0.035);
+        for (let k = 0; k < 5; k++) {
+          cyl(g, 0.02, 0.02, 0.02, dark, -w * 0.35 + (w * 0.7 / 4) * k, item.h - 0.06, d / 2 + 0.015, 8, { rx: Math.PI / 2 });
+        }
+        [-1, 1].forEach((bx) => {
+          [-1, 1].forEach((bz) => {
+            cyl(g, 0.08, 0.08, 0.015, dark, bx * (w * 0.24), item.h + 0.01, bz * (d * 0.24), 16);
+          });
+        });
+        break;
+      }
+      case 'rangeHood': {
+        box(g, w, 0.12, d, metal, 0, elev + 0.06, 0);
+        cyl(g, 0.16, w * 0.45, item.h - 0.12, metal, 0, elev + (item.h + 0.12) / 2, -d * 0.08, 4, { ry: Math.PI / 4 });
+        break;
+      }
+      case 'dishwasher': {
+        box(g, w, item.h, d, metal, 0, item.h / 2, 0);
+        box(g, w - 0.04, 0.08, 0.015, dark, 0, item.h - 0.08, d / 2 + 0.01);
+        box(g, w * 0.7, 0.025, 0.03, metal, 0, item.h - 0.18, d / 2 + 0.025);
+        break;
+      }
+      case 'microwave': {
+        box(g, w, item.h, d, metal, 0, elev + item.h / 2, 0);
+        box(g, w * 0.6, item.h * 0.7, 0.015, dark, -w * 0.14, elev + item.h / 2, d / 2 + 0.01);
+        box(g, w * 0.18, item.h * 0.7, 0.012, material(pal.dark, 0.7), w * 0.32, elev + item.h / 2, d / 2 + 0.01);
+        break;
+      }
+      case 'mirrorCabinet': {
+        box(g, w, item.h, d, cabinet, 0, elev + item.h / 2, 0);
+        box(g, w - 0.04, item.h - 0.04, 0.01, material('#c8d8dc', 0.1, 0.9), 0, elev + item.h / 2, d / 2 + 0.008);
+        break;
+      }
+      case 'towelRack': {
+        [-1, 1].forEach((s) => {
+          cyl(g, 0.015, 0.015, item.h, metal, s * (w / 2 - 0.03), elev + item.h / 2, 0);
+        });
+        for (let i = 1; i <= 4; i++) {
+          const ry = elev + (item.h / 5) * i;
+          cyl(g, 0.012, 0.012, w - 0.04, metal, 0, ry, 0, 8, { rz: Math.PI / 2 });
+          if (i === 2) box(g, w * 0.45, 0.35, 0.04, linen, -w * 0.1, ry - 0.16, 0);
+        }
+        break;
+      }
+      case 'dresser': {
+        box(g, w, item.h, d, wood, 0, item.h / 2, 0);
+        const tiers = 4;
+        for (let i = 0; i < tiers; i++) {
+          const dy = (item.h / tiers) * (i + 0.5);
+          box(g, w - 0.08, item.h / tiers - 0.03, 0.015, cabinet, 0, dy, d / 2 + 0.008);
+          [-1, 1].forEach((s) => {
+            box(g, 0.08, 0.015, 0.02, metal, s * (w * 0.22), dy, d / 2 + 0.025);
+          });
+        }
+        break;
+      }
+      case 'crib': {
+        box(g, w, 0.12, d, wood, 0, 0.25, 0);
+        box(g, w - 0.06, 0.1, d - 0.06, linen, 0, 0.35, 0);
+        [-1, 1].forEach((sx) => {
+          [-1, 1].forEach((sz) => {
+            box(g, 0.05, item.h, 0.05, wood, sx * (w / 2 - 0.02), item.h / 2, sz * (d / 2 - 0.02));
+          });
+        });
+        const slats = 8;
+        for (let i = 1; i < slats; i++) {
+          const sz = -d / 2 + (d / slats) * i;
+          [-1, 1].forEach((sx) => {
+            box(g, 0.02, item.h * 0.55, 0.02, wood, sx * (w / 2 - 0.02), item.h * 0.6, sz);
+          });
+        }
+        break;
+      }
+      case 'singleBed': {
+        box(g, w + 0.06, 0.22, d + 0.06, wood, 0, 0.14, 0);
+        box(g, w, 0.78, 0.06, wood, 0, 0.42, -d / 2 + 0.03);
+        box(g, w - 0.06, 0.18, d - 0.08, linen, 0, 0.34, 0.02);
+        box(g, w - 0.08, 0.12, d * 0.68, fabric, 0, 0.46, d * 0.16);
+        box(g, w * 0.55, 0.12, 0.32, linen, 0, 0.52, -d / 2 + 0.28);
+        break;
+      }
+      case 'fullMirror': {
+        box(g, w, item.h, d, metal, 0, elev + item.h / 2, 0);
+        box(g, w - 0.08, item.h - 0.08, 0.01, material('#cfe2e8', 0.08, 0.95), 0, elev + item.h / 2, d / 2 + 0.005);
+        break;
+      }
+      case 'officeChair': {
+        cyl(g, 0.28, 0.28, 0.04, dark, 0, 0.12, 0, 8);
+        cyl(g, 0.03, 0.03, 0.32, metal, 0, 0.28, 0);
+        box(g, w * 0.8, 0.08, d * 0.8, fabric, 0, 0.46, 0);
+        box(g, w * 0.75, 0.48, 0.06, material('#1e2227', 0.9), 0, 0.72, -d * 0.32);
+        [-1, 1].forEach((s) => {
+          box(g, 0.06, 0.22, 0.28, dark, s * (w * 0.38), 0.58, 0);
+        });
+        break;
+      }
       default:
         box(g, w, Math.min(item.h, 0.9), d, main, 0, Math.min(item.h, 0.9) / 2, 0);
         break;

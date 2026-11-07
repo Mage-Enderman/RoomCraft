@@ -2498,7 +2498,7 @@
         ctx.strokeStyle = 'rgba(44,44,52,0.36)';
         ctx.lineWidth = 1;
         ctx.stroke();
-        if (it.kind === 'bed') {
+        if (it.kind === 'bed' || it.kind === 'singleBed') {
           ctx.beginPath();
           ctx.moveTo(-w / 2 + 3, -d / 2 + d * 0.28);
           ctx.lineTo(w / 2 - 3, -d / 2 + d * 0.28);
@@ -2510,11 +2510,110 @@
           ctx.lineTo(w / 2 - 3, d / 2 - d * 0.26);
           ctx.strokeStyle = 'rgba(44,44,52,0.32)';
           ctx.stroke();
+        } else if (it.kind === 'sectionalSofa') {
+          ctx.beginPath();
+          ctx.moveTo(-w / 2 + 3, d / 2 - d * 0.26);
+          ctx.lineTo(w / 2 - 3, d / 2 - d * 0.26);
+          ctx.moveTo(-w / 2 + w * 0.45, -d / 2 + 3);
+          ctx.lineTo(-w / 2 + w * 0.45, d / 2 - 3);
+          ctx.strokeStyle = 'rgba(44,44,52,0.34)';
+          ctx.stroke();
+        } else if (it.kind === 'armchair') {
+          ctx.beginPath();
+          ctx.arc(0, 0, Math.min(w, d) * 0.35, 0, TAU);
+          ctx.strokeStyle = 'rgba(44,44,52,0.28)';
+          ctx.stroke();
         } else if (it.kind === 'toilet') {
           ctx.beginPath();
           ctx.ellipse(0, d * 0.12, w * 0.32, d * 0.3, 0, 0, TAU);
           ctx.strokeStyle = 'rgba(44,44,52,0.34)';
           ctx.stroke();
+        } else if (it.kind === 'bathtub') {
+          this.roundRect(-w / 2 + 4, -d / 2 + 4, w - 8, d - 8, Math.min(8, d * 0.3));
+          ctx.strokeStyle = 'rgba(44,44,52,0.32)';
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(w / 2 - 12, 0, 3, 0, TAU);
+          ctx.stroke();
+        } else if (it.kind === 'car') {
+          ctx.beginPath();
+          // Windshield arcs
+          ctx.moveTo(-w * 0.38, -d * 0.15);
+          ctx.lineTo(w * 0.38, -d * 0.15);
+          ctx.moveTo(-w * 0.38, d * 0.22);
+          ctx.lineTo(w * 0.38, d * 0.22);
+          ctx.strokeStyle = 'rgba(44,44,52,0.35)';
+          ctx.stroke();
+          // Wheel marks
+          [-1, 1].forEach((sx) => {
+            [-1, 1].forEach((sz) => {
+              ctx.strokeRect(sx * (w / 2 - 3) - (sx > 0 ? 3 : 0), sz * (d * 0.32) - 6, 3, 12);
+            });
+          });
+        } else if (it.kind === 'washer' || it.kind === 'dryer') {
+          ctx.beginPath();
+          ctx.arc(0, d * 0.08, Math.min(w, d) * 0.32, 0, TAU);
+          ctx.arc(0, d * 0.08, Math.min(w, d) * 0.18, 0, TAU);
+          ctx.moveTo(-w / 2 + 3, -d / 2 + 6);
+          ctx.lineTo(w / 2 - 3, -d / 2 + 6);
+          ctx.strokeStyle = 'rgba(44,44,52,0.32)';
+          ctx.stroke();
+        } else if (it.kind === 'ovenRange') {
+          [-1, 1].forEach((bx) => {
+            [-1, 1].forEach((bz) => {
+              ctx.beginPath();
+              ctx.arc(bx * (w * 0.24), bz * (d * 0.24), Math.min(w, d) * 0.12, 0, TAU);
+              ctx.stroke();
+            });
+          });
+        } else if (it.kind === 'fireplace') {
+          ctx.beginPath();
+          ctx.strokeRect(-w * 0.35, -d / 2 + 2, w * 0.7, d - 4);
+          ctx.moveTo(-w / 2, -d / 2 + 3);
+          ctx.lineTo(w / 2, -d / 2 + 3);
+          ctx.strokeStyle = 'rgba(180,90,40,0.55)';
+          ctx.stroke();
+        } else if (it.kind === 'parasol') {
+          ctx.beginPath();
+          ctx.arc(0, 0, Math.min(w, d) / 2 - 2, 0, TAU);
+          for (let sp = 0; sp < 8; sp++) {
+            const ang = (sp * Math.PI) / 4;
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(ang) * (w / 2 - 2), Math.sin(ang) * (d / 2 - 2));
+          }
+          ctx.strokeStyle = 'rgba(44,44,52,0.28)';
+          ctx.stroke();
+        } else if (it.kind === 'bbq') {
+          ctx.beginPath();
+          ctx.ellipse(0, 0, w * 0.35, d * 0.4, 0, 0, TAU);
+          for (let gl = -2; gl <= 2; gl++) {
+            ctx.moveTo(-w * 0.28, gl * (d * 0.12));
+            ctx.lineTo(w * 0.28, gl * (d * 0.12));
+          }
+          ctx.strokeStyle = 'rgba(44,44,52,0.32)';
+          ctx.stroke();
+        } else if (it.kind === 'dresser') {
+          ctx.beginPath();
+          for (let dr = 1; dr <= 3; dr++) {
+            const dy = -d / 2 + (d / 4) * dr;
+            ctx.moveTo(-w / 2 + 3, dy);
+            ctx.lineTo(w / 2 - 3, dy);
+          }
+          ctx.strokeStyle = 'rgba(44,44,52,0.26)';
+          ctx.stroke();
+        } else if (it.kind === 'officeChair') {
+          ctx.beginPath();
+          ctx.arc(0, 0, Math.min(w, d) * 0.18, 0, TAU);
+          for (let sp = 0; sp < 5; sp++) {
+            const ang = (sp * TAU) / 5 - Math.PI / 2;
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(ang) * (w * 0.38), Math.sin(ang) * (d * 0.38));
+          }
+          ctx.strokeStyle = 'rgba(44,44,52,0.32)';
+          ctx.stroke();
+        } else if (it.kind === 'planterBox') {
+          ctx.fillStyle = 'rgba(93,122,83,0.25)';
+          ctx.fill();
         }
         ctx.restore();
 

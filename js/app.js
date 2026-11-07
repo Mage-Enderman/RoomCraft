@@ -1334,37 +1334,90 @@
       this.toast('Furniture removed', 'info');
     }
 
-    addFurnitureItem(kind) {
+    addFurnitureItem(kind, customX = null, customY = null, targetRoomId = null) {
       if (!this.rooms.length) {
         this.toast('Create enclosed rooms first', 'info');
         return;
       }
       this.pushHistory();
-      const r = this.rooms[0];
-      const b = r.bounds || FC.polygonBounds(r.polygon);
+      let r = null;
+      if (targetRoomId) {
+        r = this.rooms.find((rm) => rm.id === targetRoomId);
+      }
+      if (!r && this.ui && this.ui.selection && this.ui.selection.type === 'room') {
+        r = this.rooms.find((rm) => rm.id === this.ui.selection.id);
+      }
+      if (!r) {
+        r = this.rooms[0];
+      }
+
+      const b = r.bounds || (r.polygon && r.polygon.length ? FC.polygonBounds(r.polygon) : { cx: 0, cy: 0, w: 2, d: 2 });
+      const def = FC.furnitureCatalog[kind] || {};
+      const w = def.w || (kind === 'bed' ? 1.6 : kind === 'sofa' ? 2.1 : 1.0);
+      const d = def.d || (kind === 'bed' ? 2.0 : kind === 'sofa' ? 0.9 : 0.8);
+      const h = def.h || FC.FURNITURE_HEIGHTS[kind] || 0.75;
+      const elev = def.elev || 0;
+      const mat = def.mat || 'wood';
+      const decor = !!def.decor;
+
+      let posX = customX != null ? customX : FC.round(b.cx, 3);
+      let posY = customY != null ? customY : FC.round(b.cy, 3);
+      let rot = 0;
+
+      if (customX == null && customY == null && r.polygon && r.polygon.length >= 3) {
+        const segs = FC.collectAllWalls(this.plan);
+        const doorZones = FC.findDoorZones(this.plan);
+        const roomWins = FC.findRoomWindows(r, this.plan, segs);
+        const rule = FC.ITEM_RULES[kind] || { archetype: 'wall-perimeter' };
+        if (rule.archetype === 'corner' || rule.archetype === 'corner-or-wall') {
+          const cp = FC.findCornerPlacement(r, kind, w, d, this.furniture || [], doorZones, roomWins, segs);
+          if (cp) {
+            posX = cp.x;
+            posY = cp.y;
+            rot = cp.rot;
+          }
+        } else if (rule.archetype === 'wall-perimeter' || rule.archetype === 'head-to-wall') {
+          const wp = FC.findWallPlacement(this.plan, r, segs, kind, w, d, this.furniture || [], doorZones, null, roomWins);
+          if (wp) {
+            posX = wp.x;
+            posY = wp.y;
+            rot = wp.rot;
+          }
+        }
+      }
+
       const item = {
         id: FC.uid('f'),
         roomId: r.id,
         kind,
-        x: FC.round(b.cx, 3),
-        y: FC.round(b.cy, 3),
-        w: kind === 'bed' ? 1.6 : kind === 'sofa' ? 2.1 : 1.0,
-        d: kind === 'bed' ? 2.0 : kind === 'sofa' ? 0.9 : 0.8,
-        rot: 0,
-        h: 0.75,
-        elev: 0,
-        mat: 'wood',
-        variant: '',
-        decor: false,
+        x: posX,
+        y: posY,
+        w,
+        d,
+        rot,
+        h,
+        elev,
+        mat,
+        variant: def.category || '',
+        decor,
         custom: true,
       };
+
       if (!this.furniture) this.furniture = [];
       this.furniture.push(item);
       this.plan.furniture = this.furniture;
       this.plan.furnished = true;
       this.select({ type: 'furniture', id: item.id });
       this.changed({ rooms: false, furniture: false, save: true });
-      this.toast('Placed ' + kind, 'success');
+      if (this.viewer) this.viewer.markDirty();
+      this.toast('Placed ' + (def.label || kind), 'success');
+      return item;
+    }
+
+    openFurnitureCatalog(targetRoomId = null) {
+      if (this.ui && this.ui.openFurnitureCatalogModal) {
+        this.ui.openFurnitureCatalogModal(targetRoomId);
+      }
     }
 
     addLightAt(x, y, type = 'ceiling') {

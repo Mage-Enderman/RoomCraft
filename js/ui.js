@@ -649,6 +649,7 @@
             <button class="btn soft sm" data-action="tool" data-tool="divider" title="Draw an invisible room divider to partition this space">${I('divider')} Split with divider</button>
             <button class="btn soft sm" data-action="furnish-room" data-room="${room.id}" title="Re-furnish this room">${I('magic')} Re-furnish</button>
           </div>
+          <button class="btn soft sm" style="width:100%;margin-top:8px;" data-action="open-furniture-catalog" data-room="${room.id}">${I('plus')} Browse & Add Furniture</button>
           <button class="danger-link" data-action="delete-room" data-room="${room.id}">${I('trash')} Remove this room</button>
         </div>`;
       }
@@ -834,7 +835,8 @@
           <div class="field-head"><span>Furnishing level</span><span class="value" data-density-value>${plan.density < 0.8 ? 'Essential' : plan.density > 1.15 ? 'Rich' : 'Comfort'}</span></div>
           <input type="range" data-density min="0.5" max="1.5" step="0.05" value="${plan.density}">
         </div>
-        ${plan.furnished ? `<button class="danger-link subtle" data-action="clear-furniture">${I('trash')} Clear furniture</button>` : ''}
+        <button class="btn soft sm" style="width:100%;margin-top:12px;" data-action="open-furniture-catalog">${I('plus')} Browse & Add Furniture</button>
+        ${plan.furnished ? `<button class="danger-link subtle" data-action="clear-furniture" style="margin-top:10px;">${I('trash')} Clear furniture</button>` : ''}
       </section>`;
     }
 
@@ -1271,6 +1273,9 @@
           app.recomputeFurniture();
           this.renderAll();
           break;
+        case 'open-furniture-catalog':
+          app.openFurnitureCatalog(el.dataset.room || null);
+          break;
         case 'flip-door':
         case 'flip-door-swing':
           app.flipDoor(el.dataset.opening);
@@ -1498,6 +1503,111 @@
           <div class="about-badges"><span>Plan editor</span><span>Openings</span><span>Procedural furniture</span><span>Live 3D</span></div>
         </div>`,
         actions: [{ label: 'Close', primary: true, value: true }],
+      });
+    }
+
+    openFurnitureCatalogModal(targetRoomId = null) {
+      let room = null;
+      if (targetRoomId) {
+        room = this.app.rooms.find((r) => r.id === targetRoomId);
+      }
+      if (!room && this.selection && this.selection.type === 'room') {
+        room = this.app.rooms.find((r) => r.id === this.selection.id);
+      }
+      const roomLabel = room ? (room.name || (FC.roomTypes[room.type] && FC.roomTypes[room.type].label) || 'Selected Room') : 'Floor Plan';
+
+      const categories = [
+        { id: 'all', label: 'All Items' },
+        { id: 'living', label: 'Living' },
+        { id: 'bedroom', label: 'Bedroom' },
+        { id: 'kitchen', label: 'Kitchen' },
+        { id: 'dining', label: 'Dining' },
+        { id: 'bath', label: 'Bath' },
+        { id: 'office', label: 'Office' },
+        { id: 'laundry', label: 'Laundry' },
+        { id: 'garage', label: 'Garage' },
+        { id: 'outdoor', label: 'Outdoor' },
+      ];
+
+      let activeCategory = 'all';
+      if (room && room.type) {
+        if (room.type === 'living') activeCategory = 'living';
+        else if (room.type === 'bedroom') activeCategory = 'bedroom';
+        else if (room.type === 'kitchen') activeCategory = 'kitchen';
+        else if (room.type === 'dining') activeCategory = 'dining';
+        else if (room.type === 'bath') activeCategory = 'bath';
+        else if (room.type === 'office') activeCategory = 'office';
+        else if (room.type === 'utility') activeCategory = 'laundry';
+        else if (room.type === 'garage') activeCategory = 'garage';
+        else if (room.type === 'patio' || room.type === 'balcony') activeCategory = 'outdoor';
+      }
+
+      const renderGrid = (cat) => {
+        const items = Object.entries(FC.furnitureCatalog || {}).filter(([k, def]) => {
+          if (cat === 'all') return true;
+          return def.category === cat;
+        });
+
+        if (!items.length) {
+          return '<p class="muted" style="grid-column: 1/-1; text-align: center; padding: 20px;">No items in this category.</p>';
+        }
+
+        return items
+          .map(([kind, def]) => {
+            const iconSvg = I(def.icon || 'sofa');
+            return `<button type="button" class="catalog-card" data-catalog-kind="${kind}">
+              <div class="catalog-card-icon">${iconSvg}</div>
+              <div class="catalog-card-body">
+                <span class="catalog-card-name">${esc(def.label)}</span>
+                <span class="catalog-card-dim">${def.w.toFixed(2)} × ${def.d.toFixed(2)} m</span>
+                <p class="catalog-card-desc">${esc(def.desc || '')}</p>
+              </div>
+            </button>`;
+          })
+          .join('');
+      };
+
+      const modalHTML = `<div class="catalog-modal-content">
+        <div class="catalog-tabs">
+          ${categories.map((c) => `<button type="button" class="catalog-tab ${c.id === activeCategory ? 'active' : ''}" data-cat="${c.id}">${c.label}</button>`).join('')}
+        </div>
+        <div class="catalog-grid" id="catalogItemGrid">
+          ${renderGrid(activeCategory)}
+        </div>
+      </div>`;
+
+      this.showModal({
+        title: 'Furniture & Object Catalog',
+        eyebrow: 'Target: ' + roomLabel,
+        wide: true,
+        html: modalHTML,
+        actions: [{ label: 'Close', value: null }],
+        onMount: (overlay, close) => {
+          const grid = overlay.querySelector('#catalogItemGrid');
+          const tabs = overlay.querySelectorAll('.catalog-tab');
+
+          tabs.forEach((tab) => {
+            tab.addEventListener('click', () => {
+              tabs.forEach((t) => t.classList.remove('active'));
+              tab.classList.add('active');
+              activeCategory = tab.dataset.cat;
+              grid.innerHTML = renderGrid(activeCategory);
+              bindCardClicks();
+            });
+          });
+
+          const bindCardClicks = () => {
+            overlay.querySelectorAll('.catalog-card').forEach((card) => {
+              card.addEventListener('click', () => {
+                const kind = card.dataset.catalogKind;
+                this.app.addFurnitureItem(kind, null, null, room ? room.id : null);
+                close(kind);
+              });
+            });
+          };
+
+          bindCardClicks();
+        },
       });
     }
 

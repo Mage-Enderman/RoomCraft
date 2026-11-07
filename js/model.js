@@ -1692,18 +1692,104 @@
   };
 
   /* ------------------------------------------------------------------ */
-  /* Furniture recipes (2D data)                                        */
+  /* Furniture catalog & recipes                                         */
   /* ------------------------------------------------------------------ */
+
+  FC.furnitureCatalog = {
+    // Living Room
+    sofa: { label: 'Straight Sofa', category: 'living', w: 2.1, d: 0.9, h: 0.86, mat: 'fabric', icon: 'sofa', desc: '3-seater contemporary upholstered couch' },
+    sectionalSofa: { label: 'Sectional Sofa', category: 'living', w: 2.4, d: 1.8, h: 0.84, mat: 'fabric', icon: 'sofa', desc: 'L-shaped modern corner sectional' },
+    armchair: { label: 'Armchair', category: 'living', w: 0.85, d: 0.85, h: 0.82, mat: 'fabric', icon: 'armchair', desc: 'Plush accent lounge chair' },
+    coffeeTable: { label: 'Coffee Table', category: 'living', w: 1.05, d: 0.55, h: 0.40, mat: 'wood', icon: 'layout', desc: 'Low living room center table' },
+    tvConsole: { label: 'TV Media Console', category: 'living', w: 1.8, d: 0.42, h: 0.48, mat: 'wood', icon: 'sliders', desc: 'Credenza with media storage' },
+    tv: { label: 'Flat-screen TV', category: 'living', w: 1.3, d: 0.08, h: 0.75, mat: 'screen', elev: 0.92, icon: 'layout', desc: 'Wall or stand mounted television' },
+    fireplace: { label: 'Modern Fireplace', category: 'living', w: 1.2, d: 0.32, h: 0.82, mat: 'stone', icon: 'sun', desc: 'Linear architectural fireplace' },
+    floorLamp: { label: 'Floor Lamp', category: 'living', w: 0.4, d: 0.4, h: 1.55, mat: 'metal', decor: true, icon: 'sun', desc: 'Tall ambient standing lamp' },
+    rug: { label: 'Area Rug', category: 'living', w: 2.6, d: 1.8, h: 0.015, mat: 'rug', decor: true, icon: 'layers', desc: 'Woven fabric floor covering' },
+    plant: { label: 'Indoor Plant', category: 'living', w: 0.55, d: 0.55, h: 1.25, mat: 'plant', decor: true, icon: 'sparkles', desc: 'Potted indoor greenery' },
+    bookshelf: { label: 'Bookshelf', category: 'living', w: 1.2, d: 0.35, h: 1.95, mat: 'wood', icon: 'layers', desc: 'Multi-tier storage bookcase' },
+    artwork: { label: 'Framed Artwork', category: 'living', w: 1.2, d: 0.04, h: 0.80, mat: 'wood', elev: 1.35, decor: true, icon: 'palette', desc: 'Wall art canvas' },
+
+    // Bedroom
+    bed: { label: 'Double Bed', category: 'bedroom', w: 1.6, d: 2.0, h: 0.62, mat: 'wood', icon: 'bed', desc: 'Queen/Double bed with headboard' },
+    singleBed: { label: 'Single Bed', category: 'bedroom', w: 1.0, d: 2.0, h: 0.58, mat: 'wood', icon: 'bed', desc: 'Twin single bed' },
+    crib: { label: 'Baby Crib', category: 'bedroom', w: 1.35, d: 0.75, h: 0.92, mat: 'wood', icon: 'bed', desc: 'Wooden nursery cot with slats' },
+    nightstand: { label: 'Nightstand', category: 'bedroom', w: 0.45, d: 0.40, h: 0.52, mat: 'wood', icon: 'layout', desc: 'Bedside drawer table with lamp' },
+    wardrobe: { label: 'Wardrobe', category: 'bedroom', w: 1.8, d: 0.60, h: 2.15, mat: 'cabinet', icon: 'layers', desc: 'Tall double-door clothes closet' },
+    dresser: { label: 'Dresser', category: 'bedroom', w: 1.2, d: 0.48, h: 0.86, mat: 'wood', icon: 'layers', desc: 'Wide chest of drawers' },
+    fullMirror: { label: 'Floor Mirror', category: 'bedroom', w: 0.55, d: 0.10, h: 1.65, elev: 0.15, mat: 'metal', decor: true, icon: 'sliders', desc: 'Full-length dressing mirror' },
+
+    // Kitchen
+    counter: { label: 'Kitchen Counter', category: 'kitchen', w: 1.8, d: 0.60, h: 0.92, mat: 'cabinet', icon: 'wall', desc: 'Cabinet base with countertop & sink' },
+    island: { label: 'Kitchen Island', category: 'kitchen', w: 1.4, d: 0.75, h: 0.92, mat: 'cabinet', icon: 'layout', desc: 'Freestanding prep island with stone top' },
+    upperCabinets: { label: 'Upper Cabinets', category: 'kitchen', w: 1.8, d: 0.34, h: 0.70, elev: 1.50, mat: 'cabinet', icon: 'layers', desc: 'Wall-mounted upper storage' },
+    ovenRange: { label: 'Cooking Range / Oven', category: 'kitchen', w: 0.75, d: 0.65, h: 0.90, mat: 'metal', icon: 'sliders', desc: 'Range oven with burners and glass door' },
+    rangeHood: { label: 'Range Vent Hood', category: 'kitchen', w: 0.75, d: 0.50, h: 0.65, elev: 1.55, mat: 'metal', decor: true, icon: 'ceiling', desc: 'Stainless extractor hood' },
+    fridge: { label: 'Refrigerator', category: 'kitchen', w: 0.75, d: 0.70, h: 1.95, mat: 'metal', icon: 'layers', desc: 'Full-size tall double-door fridge' },
+    dishwasher: { label: 'Dishwasher', category: 'kitchen', w: 0.60, d: 0.60, h: 0.86, mat: 'metal', icon: 'washer', desc: 'Under-counter stainless dishwasher' },
+    microwave: { label: 'Microwave', category: 'kitchen', w: 0.54, d: 0.38, h: 0.34, elev: 0.92, mat: 'metal', icon: 'cube', desc: 'Countertop/recessed microwave oven' },
+
+    // Dining
+    diningTable: { label: 'Dining Table', category: 'dining', w: 1.6, d: 0.90, h: 0.75, mat: 'wood', icon: 'layout', desc: '4-6 person dining table' },
+    chair: { label: 'Dining Chair', category: 'dining', w: 0.46, d: 0.46, h: 0.88, mat: 'wood', icon: 'armchair', desc: 'Dining or side chair' },
+    sideboard: { label: 'Sideboard Buffet', category: 'dining', w: 1.5, d: 0.42, h: 0.80, mat: 'wood', icon: 'layers', desc: 'Low storage credenza' },
+    stool: { label: 'Bar Stool', category: 'dining', w: 0.40, d: 0.40, h: 0.66, mat: 'wood', icon: 'sun', desc: 'High counter seating' },
+    pendant: { label: 'Pendant Light', category: 'dining', w: 0.45, d: 0.45, h: 0.45, elev: 2.05, mat: 'metal', decor: true, icon: 'ceiling', desc: 'Hanging ceiling luminaire' },
+
+    // Bathroom
+    vanity: { label: 'Bath Vanity & Basin', category: 'bathroom', w: 0.90, d: 0.48, h: 0.86, mat: 'cabinet', icon: 'window', desc: 'Sink cabinet with mirror' },
+    toilet: { label: 'Toilet', category: 'bathroom', w: 0.42, d: 0.65, h: 0.78, mat: 'stone', icon: 'bath', desc: 'Ceramic toilet bowl & cistern' },
+    shower: { label: 'Walk-in Shower', category: 'bathroom', w: 0.90, d: 0.90, h: 2.05, mat: 'stone', icon: 'bath', desc: 'Glass enclosure with shower head' },
+    bathtub: { label: 'Bathtub', category: 'bathroom', w: 1.65, d: 0.75, h: 0.58, mat: 'stone', icon: 'bath', desc: 'Soaking tub with faucet' },
+    mirrorCabinet: { label: 'Mirror Cabinet', category: 'bathroom', w: 0.80, d: 0.14, h: 0.75, elev: 1.35, mat: 'cabinet', decor: true, icon: 'window', desc: 'Medicine cabinet with mirror' },
+    towelRack: { label: 'Towel Warmer Rack', category: 'bathroom', w: 0.55, d: 0.12, h: 0.95, elev: 0.80, mat: 'metal', decor: true, icon: 'layers', desc: 'Wall-hung heated ladder rack' },
+    bathMat: { label: 'Bath Mat', category: 'bathroom', w: 0.75, d: 0.45, h: 0.015, mat: 'linen', decor: true, icon: 'layers', desc: 'Soft bathroom floor mat' },
+
+    // Home Office
+    desk: { label: 'Work Desk', category: 'office', w: 1.4, d: 0.65, h: 0.76, mat: 'wood', icon: 'file', desc: 'Writing and computer desk' },
+    officeChair: { label: 'Ergonomic Office Chair', category: 'office', w: 0.62, d: 0.62, h: 0.96, mat: 'fabric', icon: 'armchair', desc: 'Swivel chair with star base' },
+    monitor: { label: 'Desktop Monitor', category: 'office', w: 0.60, d: 0.15, h: 0.45, elev: 0.76, mat: 'metal', icon: 'layout', desc: 'Widescreen PC display' },
+
+    // Utility & Laundry
+    washer: { label: 'Washing Machine', category: 'utility', w: 0.62, d: 0.62, h: 0.86, mat: 'metal', icon: 'washer', desc: 'Front-load washing machine' },
+    dryer: { label: 'Tumble Dryer', category: 'utility', w: 0.62, d: 0.62, h: 0.86, mat: 'metal', icon: 'washer', desc: 'Front-load clothes dryer' },
+    laundrySink: { label: 'Utility Laundry Sink', category: 'utility', w: 0.65, d: 0.60, h: 0.88, mat: 'cabinet', icon: 'bath', desc: 'Deep basin wash tub' },
+    ironingBoard: { label: 'Ironing Board', category: 'utility', w: 1.25, d: 0.38, h: 0.85, mat: 'fabric', icon: 'sliders', desc: 'Folding ironing table' },
+
+    // Garage
+    car: { label: 'Passenger Car', category: 'garage', w: 1.85, d: 4.40, h: 1.45, mat: 'metal', icon: 'car', desc: 'Full-size sedan/SUV vehicle' },
+    workbench: { label: 'Heavy Workbench', category: 'garage', w: 1.60, d: 0.65, h: 0.90, mat: 'wood', icon: 'tool', desc: 'Workshop bench with tool backing' },
+    toolCabinet: { label: 'Tool Chest', category: 'garage', w: 0.85, d: 0.50, h: 1.05, mat: 'metal', icon: 'tool', desc: 'Rolling multi-drawer mechanic chest' },
+    garageShelving: { label: 'Industrial Shelving', category: 'garage', w: 1.50, d: 0.50, h: 1.95, mat: 'metal', icon: 'layers', desc: 'Heavy-duty steel storage racks' },
+    bicycle: { label: 'Bicycle', category: 'garage', w: 1.75, d: 0.45, h: 1.05, mat: 'metal', icon: 'sliders', desc: 'Wall/floor bicycle' },
+    boxes: { label: 'Storage Boxes', category: 'garage', w: 0.45, d: 0.45, h: 0.70, mat: 'wood', decor: true, icon: 'cube', desc: 'Stacked storage cartons' },
+    shelf: { label: 'Utility Shelf', category: 'garage', w: 1.20, d: 0.35, h: 1.80, mat: 'metal', icon: 'layers', desc: 'Multi-shelf metal rack' },
+
+    // Outdoor & Patio
+    patioTable: { label: 'Patio Table', category: 'outdoor', w: 0.90, d: 0.90, h: 0.74, mat: 'wood', icon: 'layout', desc: 'Outdoor garden dining table' },
+    patioChair: { label: 'Patio Chair', category: 'outdoor', w: 0.55, d: 0.55, h: 0.82, mat: 'wood', icon: 'armchair', desc: 'Weatherproof outdoor chair' },
+    sunLounger: { label: 'Sun Lounger', category: 'outdoor', w: 0.68, d: 1.90, h: 0.42, mat: 'fabric', icon: 'sun', desc: 'Reclining chaise lounge' },
+    parasol: { label: 'Patio Umbrella', category: 'outdoor', w: 2.20, d: 2.20, h: 2.35, mat: 'fabric', decor: true, icon: 'umbrella', desc: 'Freestanding garden parasol' },
+    bbq: { label: 'Barbecue Grill', category: 'outdoor', w: 1.15, d: 0.60, h: 1.10, mat: 'metal', icon: 'sliders', desc: 'Outdoor charcoal/gas BBQ grill' },
+    planterBox: { label: 'Planter Box', category: 'outdoor', w: 1.20, d: 0.35, h: 0.48, mat: 'wood', decor: true, icon: 'sparkles', desc: 'Railing flower planter with shrubs' },
+  };
 
   const FURNITURE_HEIGHTS = {
     bed: 0.62,
+    singleBed: 0.58,
+    crib: 0.92,
     nightstand: 0.52,
     wardrobe: 2.15,
+    dresser: 0.86,
+    fullMirror: 1.65,
     sofa: 0.86,
+    sectionalSofa: 0.84,
+    armchair: 0.82,
     rug: 0.015,
     coffeeTable: 0.4,
     tvConsole: 0.48,
     tv: 0.72,
+    fireplace: 0.82,
     plant: 1.25,
     diningTable: 0.75,
     chair: 0.88,
@@ -1712,11 +1798,18 @@
     island: 0.92,
     stool: 0.66,
     fridge: 1.95,
+    ovenRange: 0.90,
+    rangeHood: 0.65,
+    dishwasher: 0.86,
+    microwave: 0.34,
     toilet: 0.78,
     vanity: 0.86,
     shower: 2.05,
     bathtub: 0.58,
+    mirrorCabinet: 0.75,
+    towelRack: 0.95,
     desk: 0.76,
+    officeChair: 0.96,
     bookshelf: 1.95,
     console: 0.82,
     boxes: 0.7,
@@ -1728,11 +1821,92 @@
     shelf: 1.8,
     tableSmall: 0.52,
     artwork: 0.8,
+    // Utility & Laundry
+    washer: 0.86,
+    dryer: 0.86,
+    laundrySink: 0.88,
+    ironingBoard: 0.85,
+    // Garage
+    car: 1.45,
+    workbench: 0.90,
+    toolCabinet: 1.05,
+    garageShelving: 1.95,
+    bicycle: 1.05,
+    // Outdoor
+    patioTable: 0.74,
+    patioChair: 0.82,
+    sunLounger: 0.42,
+    parasol: 2.35,
+    bbq: 1.10,
+    planterBox: 0.48,
   };
+  FC.FURNITURE_HEIGHTS = FURNITURE_HEIGHTS;
 
   /* ------------------------------------------------------------------ */
   /* Furniture Placement & Collision Engine                             */
   /* ------------------------------------------------------------------ */
+
+  FC.ITEM_RULES = {
+    // Corner items
+    shower: { archetype: 'corner', minWallDist: 0.04, blocksWindow: 'always' },
+    bathtub: { archetype: 'corner-or-wall', minWallDist: 0.04, blocksWindow: 'tall-only' },
+    toilet: { archetype: 'wall-perimeter', tuckCorner: true, blocksWindow: 'always' },
+    plant: { archetype: 'corner', blocksWindow: 'never', decor: true },
+    floorLamp: { archetype: 'corner-or-relative', blocksWindow: 'never', decor: true },
+    sectionalSofa: { archetype: 'corner-or-center', faceWall: true, blocksWindow: 'never' },
+
+    // Perimeter wall items
+    wardrobe: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'always' },
+    dresser: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'always' },
+    bookshelf: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'always' },
+    tvConsole: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'always' },
+    sideboard: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'always' },
+    vanity: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'always' },
+    workbench: { archetype: 'wall-perimeter', minWallDist: 0.03, blocksWindow: 'always' },
+    toolCabinet: { archetype: 'wall-perimeter', minWallDist: 0.03, blocksWindow: 'always' },
+    garageShelving: { archetype: 'wall-perimeter', minWallDist: 0.03, blocksWindow: 'always' },
+    washer: { archetype: 'wall-perimeter', minWallDist: 0.03, blocksWindow: 'always' },
+    dryer: { archetype: 'relative-adjacent', parentKind: 'washer' },
+    ovenRange: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'always' },
+    dishwasher: { archetype: 'relative-adjacent', parentKind: 'counter' },
+    counter: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'never' },
+    desk: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'low-permitted' },
+    fridge: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'always' },
+    fireplace: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'always' },
+    console: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'low-permitted' },
+    shelf: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'always' },
+
+    // Head-to-wall items
+    bed: { archetype: 'head-to-wall', headMargin: 0.04, blocksWindow: 'head-only' },
+    singleBed: { archetype: 'head-to-wall', headMargin: 0.04, blocksWindow: 'head-only' },
+    crib: { archetype: 'wall-perimeter', minWallDist: 0.04, blocksWindow: 'always' },
+    car: { archetype: 'parking-bay', minDrivewayW: 2.4, minDrivewayD: 4.2 },
+
+    // Floating island & social grouping
+    armchair: { archetype: 'relative-angle', parentKind: 'sofa', blocksWindow: 'never' },
+    officeChair: { archetype: 'relative-tuck', parentKind: 'desk', blocksWindow: 'never' },
+    diningTable: { archetype: 'floating-zone', clearance: 0.8 },
+    coffeeTable: { archetype: 'relative-front', parentKind: 'sofa', dist: 0.4 },
+    patioTable: { archetype: 'floating-zone', clearance: 0.7 },
+    patioChair: { archetype: 'relative-tuck', parentKind: 'patioTable', blocksWindow: 'never' },
+    sunLounger: { archetype: 'floating-or-wall', clearance: 0.5 },
+    parasol: { archetype: 'relative-adjacent', parentKind: 'patioTable', blocksWindow: 'never' },
+    bbq: { archetype: 'wall-perimeter', outdoor: true },
+    planterBox: { archetype: 'perimeter-edge', outdoor: true },
+    bicycle: { archetype: 'wall-perimeter', minWallDist: 0.04, blocksWindow: 'never' },
+    laundrySink: { archetype: 'wall-perimeter', minWallDist: 0.02, blocksWindow: 'never' },
+    ironingBoard: { archetype: 'wall-perimeter', minWallDist: 0.04, blocksWindow: 'never' },
+    island: { archetype: 'floating-zone', clearance: 0.9 },
+
+    // Elevated wall mounts
+    rangeHood: { archetype: 'relative-stacked', parentKind: 'ovenRange', elev: 1.55 },
+    mirrorCabinet: { archetype: 'relative-stacked', parentKind: 'vanity', elev: 1.35 },
+    towelRack: { archetype: 'wall-perimeter', elev: 0.80 },
+    microwave: { archetype: 'relative-stacked', parentKind: 'counter', elev: 0.92 },
+    upperCabinets: { archetype: 'wall-perimeter', elev: 1.50, blocksWindow: 'always' },
+    fullMirror: { archetype: 'wall-perimeter', elev: 0.15, blocksWindow: 'always' },
+    artwork: { archetype: 'wall-perimeter', elev: 1.35, blocksWindow: 'always' }
+  };
 
   FC.itemCorners = function (item, margin) {
     margin = margin || 0;
@@ -1797,7 +1971,16 @@
   };
 
   FC.isNonSolid = function (item) {
-    return item.kind === 'rug' || item.kind === 'bathMat' || item.kind === 'pendant' || item.kind === 'artwork';
+    return (
+      item.kind === 'rug' ||
+      item.kind === 'bathMat' ||
+      item.kind === 'pendant' ||
+      item.kind === 'artwork' ||
+      item.kind === 'mirrorCabinet' ||
+      item.kind === 'towelRack' ||
+      item.kind === 'rangeHood' ||
+      item.kind === 'fullMirror'
+    );
   };
 
   FC.itemsOverlap = function (itemA, itemB, margin) {
@@ -1807,8 +1990,14 @@
     const hA = itemA.h || 0.6;
     const hB = itemB.h || 0.6;
     if (elevA + hA <= elevB + 0.05 || elevB + hB <= elevA + 0.05) return false;
-    if ((itemA.kind === 'chair' && (itemB.kind === 'diningTable' || itemB.kind === 'desk')) ||
-        (itemB.kind === 'chair' && (itemA.kind === 'diningTable' || itemA.kind === 'desk'))) {
+    if (
+      (itemA.kind === 'chair' && (itemB.kind === 'diningTable' || itemB.kind === 'desk')) ||
+      (itemB.kind === 'chair' && (itemA.kind === 'diningTable' || itemA.kind === 'desk')) ||
+      (itemA.kind === 'patioChair' && itemB.kind === 'patioTable') ||
+      (itemB.kind === 'patioChair' && itemA.kind === 'patioTable') ||
+      (itemA.kind === 'officeChair' && itemB.kind === 'desk') ||
+      (itemB.kind === 'officeChair' && itemA.kind === 'desk')
+    ) {
       return false;
     }
     const cornersA = FC.itemCorners(itemA, margin || 0.02);
@@ -1928,6 +2117,28 @@
     return best.area > 0 ? best : b;
   };
 
+  FC.itemBlocksCirculation = function (item, doorZones, roomPoly) {
+    if (FC.isNonSolid(item) || item.elev > 0.5) return false;
+    const rule = FC.ITEM_RULES[item.kind];
+    // Perimeter and corner wall items hug walls and don't block center corridors
+    if (rule && (rule.archetype === 'wall-perimeter' || rule.archetype === 'corner' || rule.archetype === 'relative-stacked')) {
+      return false;
+    }
+    const itemPt = { x: item.x, y: item.y };
+    const clearance = (rule && rule.clearance) || 0.65;
+    for (let i = 0; i < doorZones.length; i++) {
+      for (let j = i + 1; j < doorZones.length; j++) {
+        const d1 = doorZones[i];
+        const d2 = doorZones[j];
+        const h = FC.pointSegment(itemPt, d1, d2);
+        if (h.dist < clearance) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   FC.canPlaceFurniture = function (plan, room, item, placedItems, doorZones, wallSegments) {
     if (room && room.polygon && !FC.itemInPolygon(item, room.polygon, 0.02)) {
       return false;
@@ -1945,6 +2156,9 @@
     if (doorZones && FC.itemBlocksDoor(item, doorZones)) {
       return false;
     }
+    if (doorZones && doorZones.length >= 2 && room && room.polygon && FC.itemBlocksCirculation(item, doorZones, room.polygon)) {
+      return false;
+    }
     if (wallSegments && FC.itemIntersectsWall(item, wallSegments)) {
       return false;
     }
@@ -1954,6 +2168,33 @@
       }
     }
     return true;
+  };
+
+  FC.findCornerPlacement = function (room, itemKind, itemW, itemD, placedItems, doorZones, roomWins, segs) {
+    const corners = FC.findRoomCorners(room);
+    if (!corners || !corners.length) return null;
+    for (let c = 0; c < corners.length; c++) {
+      const cr = corners[c];
+      // Orientation 1: along u1
+      const cx1 = cr.pt.x + cr.u1.x * (itemW / 2 + 0.04) + cr.u2.x * (itemD / 2 + 0.04);
+      const cy1 = cr.pt.y + cr.u1.y * (itemW / 2 + 0.04) + cr.u2.y * (itemD / 2 + 0.04);
+      const rot1 = Math.atan2(cr.u1.y, cr.u1.x);
+      const cand1 = { kind: itemKind, x: FC.round(cx1, 3), y: FC.round(cy1, 3), w: itemW, d: itemD, rot: FC.round(rot1, 3) };
+      if ((!roomWins || !roomWins.length || !FC.itemBlocksWindow(cand1, roomWins, 0.08)) &&
+          FC.canPlaceFurniture(null, room, cand1, placedItems, doorZones, segs)) {
+        return cand1;
+      }
+      // Orientation 2: along u2
+      const cx2 = cr.pt.x + cr.u2.x * (itemW / 2 + 0.04) + cr.u1.x * (itemD / 2 + 0.04);
+      const cy2 = cr.pt.y + cr.u2.y * (itemW / 2 + 0.04) + cr.u1.y * (itemD / 2 + 0.04);
+      const rot2 = Math.atan2(cr.u2.y, cr.u2.x);
+      const cand2 = { kind: itemKind, x: FC.round(cx2, 3), y: FC.round(cy2, 3), w: itemW, d: itemD, rot: FC.round(rot2, 3) };
+      if ((!roomWins || !roomWins.length || !FC.itemBlocksWindow(cand2, roomWins, 0.08)) &&
+          FC.canPlaceFurniture(null, room, cand2, placedItems, doorZones, segs)) {
+        return cand2;
+      }
+    }
+    return null;
   };
 
   FC.findWallSegmentsForRoom = function (room, wallSegs) {
@@ -1994,9 +2235,14 @@
     return matched;
   };
 
-  FC.findWallPlacement = function (plan, room, segs, itemKind, itemW, itemD, placedItems, doorZones, filterFn) {
+  FC.findWallPlacement = function (plan, room, segs, itemKind, itemW, itemD, placedItems, doorZones, filterFn, roomWindows) {
     const walls = FC.findWallSegmentsForRoom(room, segs);
     walls.sort((a, b) => b.len - a.len);
+
+    const rule = (FC.ITEM_RULES && FC.ITEM_RULES[itemKind]) || {};
+    const isWindowSensitive = rule.blocksWindow === 'always' || (FURNITURE_HEIGHTS[itemKind] || 0.6) > 1.05;
+    const roomWins = isWindowSensitive ? (roomWindows || FC.findRoomWindows(room, plan, segs)) : null;
+
     for (let i = 0; i < walls.length; i++) {
       const w = walls[i];
       if (filterFn && !filterFn(w)) continue;
@@ -2024,6 +2270,11 @@
           ny: w.ny,
           wall: w,
         };
+
+        if (roomWins && roomWins.length && FC.itemBlocksWindow(item, roomWins)) {
+          continue;
+        }
+
         if (FC.canPlaceFurniture(plan, room, item, placedItems, doorZones, segs)) {
           return item;
         }
@@ -2079,6 +2330,64 @@
       if (Math.hypot(bed.x - wz.x, bed.y - wz.y) < (wz.width || 0.9) / 2 + 0.6) return true;
     }
     return false;
+  };
+
+  FC.itemBlocksWindow = function (item, roomWindows, margin) {
+    if (!roomWindows || !roomWindows.length) return false;
+    const m = margin == null ? 0.2 : margin;
+    const itemHalfDiag = Math.hypot(item.w, item.d) / 2;
+
+    for (let i = 0; i < roomWindows.length; i++) {
+      const wz = roomWindows[i];
+      const winHalfW = (wz.width || 0.9) / 2;
+      const d = Math.hypot(item.x - wz.x, item.y - wz.y);
+      if (d > itemHalfDiag + winHalfW + m + 0.3) continue;
+
+      const cos = Math.cos(item.rot || 0);
+      const sin = Math.sin(item.rot || 0);
+      const dx = wz.x - item.x;
+      const dy = wz.y - item.y;
+      // Local coordinates (lx along item width / wall direction, ly along item depth)
+      const lx = Math.abs(dx * cos + dy * sin);
+      const ly = Math.abs(-dx * sin + dy * cos);
+
+      if (lx < (item.w / 2 + winHalfW + m) && ly < (item.d / 2 + 0.45)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  FC.findRoomCorners = function (room) {
+    if (!room || !room.polygon || room.polygon.length < 3) return [];
+    const poly = room.polygon;
+    const n = poly.length;
+    const corners = [];
+    for (let i = 0; i < n; i++) {
+      const prev = poly[(i - 1 + n) % n];
+      const curr = poly[i];
+      const next = poly[(i + 1) % n];
+      const d1x = prev.x - curr.x, d1y = prev.y - curr.y;
+      const d2x = next.x - curr.x, d2y = next.y - curr.y;
+      const l1 = Math.hypot(d1x, d1y), l2 = Math.hypot(d2x, d2y);
+      if (l1 < 0.4 || l2 < 0.4) continue;
+      const u1x = d1x / l1, u1y = d1y / l1;
+      const u2x = d2x / l2, u2y = d2y / l2;
+      const bisectX = u1x + u2x, bisectY = u1y + u2y;
+      const bl = Math.hypot(bisectX, bisectY);
+      if (bl < 0.1) continue;
+      const inX = bisectX / bl, inY = bisectY / bl;
+      const testPt = { x: curr.x + inX * 0.2, y: curr.y + inY * 0.2 };
+      if (FC.pointInPolygon(testPt, poly)) {
+        corners.push({
+          pt: curr,
+          u1: { x: u1x, y: u1y, len: l1 },
+          u2: { x: u2x, y: u2y, len: l2 },
+          inDir: { x: inX, y: inY },
+        });
+      }
+    }
+    return corners;
   };
 
   FC.furnishPlan = function (plan, rooms) {
@@ -2276,7 +2585,7 @@
           add(room, 'rug', placedBed.x + rOff, placedBed.y + rOffY, rugW, rugD, placedBed.rot, { mat: 'rug', decor: true });
         }
 
-        // Study Desk with Computer / Monitor & Chair
+        // Study Desk with Computer / Monitor & Ergonomic Chair
         if (room.area >= 12) {
           const dPlaced = FC.findWallPlacement(plan, room, wallSegments, 'desk', Math.min(1.4, Math.max(1.0, W * 0.35)), 0.6, items, doorZones, (w) => w !== bedWall);
           if (dPlaced) {
@@ -2285,8 +2594,24 @@
               const nx = Math.round(Math.cos(dPlaced.rot + Math.PI / 2) * 1000) / 1000;
               const ny = Math.round(Math.sin(dPlaced.rot + Math.PI / 2) * 1000) / 1000;
               add(room, 'monitor', desk.x - nx * 0.15, desk.y - ny * 0.15, 0.55, 0.12, dPlaced.rot, { mat: 'metal', elev: 0.76, h: 0.4 });
-              add(room, 'chair', desk.x + nx * 0.55, desk.y + ny * 0.55, 0.48, 0.48, dPlaced.rot + Math.PI, { mat: 'fabric' });
+              add(room, 'officeChair', desk.x + nx * 0.55, desk.y + ny * 0.55, 0.58, 0.58, dPlaced.rot + Math.PI, { mat: 'fabric' });
             }
+          }
+        }
+
+        // Dresser (Chest of Drawers)
+        if (room.area >= 10) {
+          const drPlaced = FC.findWallPlacement(plan, room, wallSegments, 'dresser', Math.min(1.3, W * 0.4), 0.48, items, doorZones, (w) => w !== bedWall);
+          if (drPlaced) {
+            add(room, 'dresser', drPlaced.x, drPlaced.y, drPlaced.w, drPlaced.d, drPlaced.rot, { mat: 'wood' });
+          }
+        }
+
+        // Full-length Mirror
+        if (room.area >= 12) {
+          const fmPlaced = FC.findWallPlacement(plan, room, wallSegments, 'fullMirror', 0.55, 0.1, items, doorZones, (w) => w !== bedWall);
+          if (fmPlaced) {
+            add(room, 'fullMirror', fmPlaced.x, fmPlaced.y, fmPlaced.w, fmPlaced.d, fmPlaced.rot, { elev: 0.15, h: 1.65, mat: 'metal', decor: true });
           }
         }
 
@@ -2313,13 +2638,90 @@
             }
           }
         }
-      } else if (type === 'bathroom') {
-        const sh = Math.min(0.95, Math.min(W * 0.48, D * 0.5));
-        const s1 = add(room, 'shower', x0 + sh / 2 + 0.05, y0 + sh / 2 + 0.05, sh, sh, 0, { mat: 'stone' });
-        if (!s1) add(room, 'shower', x1 - sh / 2 - 0.05, y0 + sh / 2 + 0.05, sh, sh, 0, { mat: 'stone' });
-        add(room, 'vanity', cx, y1 - 0.28, Math.min(0.95, W * 0.52), 0.48, Math.PI, { mat: 'cabinet' });
-        add(room, 'toilet', x1 - 0.3, cy, 0.42, 0.65, Math.PI / 2, { mat: 'stone' });
-        add(room, 'bathMat', cx, cy, Math.min(0.8, W * 0.5), 0.5, 0, { mat: 'linen', decor: true });
+      } else if (type === 'bathroom' || type === 'bath') {
+        const roomWins = FC.findRoomWindows(room, plan, wallSegments);
+        const corners = FC.findRoomCorners(room);
+        const walls = FC.findWallSegmentsForRoom(room, wallSegments);
+        walls.sort((a, b) => b.len - a.len);
+
+        // 1. Shower or Bathtub in corner
+        let showerPlaced = null;
+        if (room.area >= 2.4) {
+          const useTub = room.area >= 3.8;
+          if (useTub) {
+            const tubW = 1.6;
+            const tubD = 0.75;
+            const tubCand = FC.findCornerPlacement(room, 'bathtub', tubW, tubD, items, doorZones, roomWins, wallSegments);
+            if (tubCand) {
+              showerPlaced = add(room, 'bathtub', tubCand.x, tubCand.y, tubW, tubD, tubCand.rot, { mat: 'stone' });
+            }
+          }
+          if (!showerPlaced) {
+            const shW = Math.min(0.95, Math.max(0.78, Math.sqrt(room.area) * 0.38));
+            const shCand = FC.findCornerPlacement(room, 'shower', shW, shW, items, doorZones, roomWins, wallSegments);
+            if (shCand) {
+              showerPlaced = add(room, 'shower', shCand.x, shCand.y, shW, shW, shCand.rot, { mat: 'stone' });
+            }
+          }
+        }
+
+        // 2. Vanity aligned with wall, plus Medicine Mirror Cabinet above
+        const vanityW = Math.min(1.0, Math.max(0.55, Math.sqrt(room.area) * 0.32));
+        const vPlaced = FC.findWallPlacement(plan, room, wallSegments, 'vanity', vanityW, 0.44, items, doorZones, null, roomWins);
+        if (vPlaced) {
+          add(room, 'vanity', vPlaced.x, vPlaced.y, vPlaced.w, vPlaced.d, vPlaced.rot, { mat: 'cabinet' });
+          add(room, 'mirrorCabinet', vPlaced.x, vPlaced.y, Math.min(0.8, vPlaced.w * 0.85), 0.12, vPlaced.rot, { elev: 1.35, h: 0.75, mat: 'cabinet', decor: true });
+        }
+
+        // 3. Toilet tucked into corner / wall-end
+        const toiletW = 0.42;
+        const toiletD = 0.62;
+        let toiletPlaced = null;
+
+        for (let w = 0; w < walls.length && !toiletPlaced; w++) {
+          const wall = walls[w];
+          if (wall.len < toiletW + 0.15) continue;
+          const uX = (wall.p2.x - wall.p1.x) / wall.len;
+          const uY = (wall.p2.y - wall.p1.y) / wall.len;
+          const rot = Math.atan2(wall.ny, wall.nx) - Math.PI / 2;
+
+          // Corner end 1
+          const c1X = wall.p1.x + uX * (toiletW / 2 + 0.1) + wall.nx * (toiletD / 2 + 0.04);
+          const c1Y = wall.p1.y + uY * (toiletW / 2 + 0.1) + wall.ny * (toiletD / 2 + 0.04);
+          const tCand1 = { kind: 'toilet', x: c1X, y: c1Y, w: toiletW, d: toiletD, rot };
+          if (!roomWins || !roomWins.length || !FC.itemBlocksWindow(tCand1, roomWins, 0.1)) {
+            toiletPlaced = add(room, 'toilet', c1X, c1Y, toiletW, toiletD, rot, { mat: 'stone' });
+            if (toiletPlaced) break;
+          }
+
+          // Corner end 2
+          const c2X = wall.p2.x - uX * (toiletW / 2 + 0.1) + wall.nx * (toiletD / 2 + 0.04);
+          const c2Y = wall.p2.y - uY * (toiletW / 2 + 0.1) + wall.ny * (toiletD / 2 + 0.04);
+          const tCand2 = { kind: 'toilet', x: c2X, y: c2Y, w: toiletW, d: toiletD, rot };
+          if (!roomWins || !roomWins.length || !FC.itemBlocksWindow(tCand2, roomWins, 0.1)) {
+            toiletPlaced = add(room, 'toilet', c2X, c2Y, toiletW, toiletD, rot, { mat: 'stone' });
+            if (toiletPlaced) break;
+          }
+
+          // Mid wall fallback
+          const midX = wall.mid.x + wall.nx * (toiletD / 2 + 0.04);
+          const midY = wall.mid.y + wall.ny * (toiletD / 2 + 0.04);
+          const tCandMid = { kind: 'toilet', x: midX, y: midY, w: toiletW, d: toiletD, rot };
+          if (!roomWins || !roomWins.length || !FC.itemBlocksWindow(tCandMid, roomWins, 0.1)) {
+            toiletPlaced = add(room, 'toilet', midX, midY, toiletW, toiletD, rot, { mat: 'stone' });
+            if (toiletPlaced) break;
+          }
+        }
+
+        // 4. Towel Rack
+        const trPlaced = FC.findWallPlacement(plan, room, wallSegments, 'towelRack', 0.55, 0.12, items, doorZones);
+        if (trPlaced) {
+          add(room, 'towelRack', trPlaced.x, trPlaced.y, trPlaced.w, trPlaced.d, trPlaced.rot, { elev: 0.8, h: 0.95, mat: 'metal', decor: true });
+        }
+
+        // 5. Bath mat
+        const b = room.bounds || FC.polygonBounds(room.polygon);
+        add(room, 'bathMat', b.cx, b.cy, Math.min(0.8, W * 0.5), 0.45, 0, { mat: 'linen', decor: true });
       } else if (type === 'hallway') {
         const long = D > W;
         if (long) {
@@ -2338,11 +2740,32 @@
           }
         }
       } else if (type === 'kitchen') {
-        add(room, 'counter', cx, y0 + 0.31, Math.max(1.0, W - 0.5), 0.6, 0, { mat: 'cabinet', variant: 'sink' });
+        // Main sink counter & upper wall cabinets
+        const counter = add(room, 'counter', cx, y0 + 0.31, Math.max(1.0, W - 0.5), 0.6, 0, { mat: 'cabinet', variant: 'sink' });
         add(room, 'upperCabinets', cx, y0 + 0.19, Math.max(0.9, W - 1.0), 0.32, 0, { mat: 'cabinet', elev: 1.5, h: 0.7 });
-        add(room, 'fridge', x0 + 0.4, y1 - 0.4, 0.72, 0.7, Math.PI, { mat: 'metal' });
+        add(room, 'fridge', x0 + 0.4, y1 - 0.4, 0.75, 0.7, Math.PI, { mat: 'metal' });
+
+        // Freestanding Cooking Range & Vent Hood
+        const ovenPlaced = FC.findWallPlacement(plan, room, wallSegments, 'ovenRange', 0.75, 0.65, items, doorZones);
+        if (ovenPlaced) {
+          add(room, 'ovenRange', ovenPlaced.x, ovenPlaced.y, ovenPlaced.w, ovenPlaced.d, ovenPlaced.rot, { mat: 'metal' });
+          add(room, 'rangeHood', ovenPlaced.x, ovenPlaced.y, ovenPlaced.w, 0.5, ovenPlaced.rot, { mat: 'metal', elev: 1.55, h: 0.65, decor: true });
+        }
+
+        // Dishwasher
+        if (room.area >= 7.0) {
+          const dwPlaced = FC.findWallPlacement(plan, room, wallSegments, 'dishwasher', 0.6, 0.6, items, doorZones);
+          if (dwPlaced) add(room, 'dishwasher', dwPlaced.x, dwPlaced.y, dwPlaced.w, dwPlaced.d, dwPlaced.rot, { mat: 'metal' });
+        }
+
+        // Microwave on counter
+        if (counter && counter.w >= 1.4) {
+          add(room, 'microwave', counter.x - counter.w * 0.3, counter.y, 0.54, 0.38, counter.rot, { mat: 'metal', elev: 0.92, h: 0.34, decor: true });
+        }
+
+        // Prep Island
         if (W > 3.6 && D > 2.8) {
-          add(room, 'island', cx, cy, 1.4, 0.7, 0, { mat: 'cabinet' });
+          add(room, 'island', cx, cy, 1.4, 0.75, 0, { mat: 'cabinet' });
         }
       } else if (type === 'dining') {
         const tw = Math.min(1.8, W * 0.55);
@@ -2365,7 +2788,7 @@
         const dw = Math.min(1.6, W * 0.6);
         add(room, 'desk', cx, y0 + 0.38, dw, 0.65, 0, { mat: 'wood' });
         add(room, 'monitor', cx, y0 + 0.22, 0.6, 0.12, 0, { mat: 'metal', elev: 0.78, h: 0.4 });
-        add(room, 'chair', cx, y0 + 0.95, 0.48, 0.48, Math.PI, { mat: 'fabric' });
+        add(room, 'officeChair', cx, y0 + 0.95, 0.58, 0.58, Math.PI, { mat: 'fabric' });
         add(room, 'rug', cx, cy + 0.3, Math.min(2.1, W * 0.6), Math.min(1.5, D * 0.4), 0, { mat: 'rug', decor: true });
         const bs = FC.findWallPlacement(plan, room, wallSegments, 'bookshelf', Math.min(1.6, Math.max(0.9, W * 0.4)), 0.35, items, doorZones);
         if (bs) add(room, 'bookshelf', bs.x, bs.y, bs.w, bs.d, bs.rot, { mat: 'wood' });
@@ -2376,32 +2799,138 @@
         if (type === 'storage' && room.area > 3.0) {
           add(room, 'boxes', cx, cy, 0.45, 0.45, 0, { mat: 'wood', decor: true });
         }
+      } else if (type === 'garage') {
+        // Vehicle in parking bay
+        if (W >= 2.4 && D >= 3.8) {
+          const carRot = D >= W ? 0 : Math.PI / 2;
+          add(room, 'car', cx, cy, 1.85, 4.4, carRot, { mat: 'metal' });
+        }
+        // Heavy workbench
+        const wb = FC.findWallPlacement(plan, room, wallSegments, 'workbench', Math.min(1.8, Math.max(1.2, W * 0.5)), 0.65, items, doorZones);
+        if (wb) add(room, 'workbench', wb.x, wb.y, wb.w, wb.d, wb.rot, { mat: 'wood' });
+        // Tool cabinet
+        const tc = FC.findWallPlacement(plan, room, wallSegments, 'toolCabinet', 0.85, 0.5, items, doorZones);
+        if (tc) add(room, 'toolCabinet', tc.x, tc.y, tc.w, tc.d, tc.rot, { mat: 'metal' });
+        // Garage metal shelving
+        const sh = FC.findWallPlacement(plan, room, wallSegments, 'garageShelving', Math.min(1.6, W * 0.45), 0.5, items, doorZones);
+        if (sh) add(room, 'garageShelving', sh.x, sh.y, sh.w, sh.d, sh.rot, { mat: 'metal' });
+        // Bicycle
+        if (room.area >= 14) {
+          const bi = FC.findWallPlacement(plan, room, wallSegments, 'bicycle', 1.75, 0.45, items, doorZones);
+          if (bi) add(room, 'bicycle', bi.x, bi.y, bi.w, bi.d, bi.rot, { mat: 'metal' });
+        }
+      } else if (type === 'utility') {
+        // Laundry pair: washer and dryer
+        const wPlaced = FC.findWallPlacement(plan, room, wallSegments, 'washer', 0.65, 0.65, items, doorZones);
+        if (wPlaced) {
+          add(room, 'washer', wPlaced.x, wPlaced.y, 0.62, 0.62, wPlaced.rot, { mat: 'metal' });
+          const uX = Math.cos(wPlaced.rot);
+          const uY = Math.sin(wPlaced.rot);
+          add(room, 'dryer', wPlaced.x + uX * 0.66, wPlaced.y + uY * 0.66, 0.62, 0.62, wPlaced.rot, { mat: 'metal' }) ||
+            add(room, 'dryer', wPlaced.x - uX * 0.66, wPlaced.y - uY * 0.66, 0.62, 0.62, wPlaced.rot, { mat: 'metal' });
+        }
+        // Deep laundry sink
+        const ls = FC.findWallPlacement(plan, room, wallSegments, 'laundrySink', 0.65, 0.6, items, doorZones);
+        if (ls) add(room, 'laundrySink', ls.x, ls.y, ls.w, ls.d, ls.rot, { mat: 'cabinet' });
+        // Ironing board or shelving
+        if (room.area >= 5.0) {
+          const ib = FC.findWallPlacement(plan, room, wallSegments, 'ironingBoard', 1.25, 0.38, items, doorZones);
+          if (ib) add(room, 'ironingBoard', ib.x, ib.y, ib.w, ib.d, ib.rot, { mat: 'fabric' });
+        } else {
+          add(room, 'shelf', cx, cy, Math.min(1.2, W * 0.6), 0.35, 0, { mat: 'metal' });
+        }
+      } else if (type === 'patio' || type === 'balcony') {
+        const isBalcony = type === 'balcony';
+        if (room.area >= 6.0 && !isBalcony) {
+          // Patio dining setup
+          const table = add(room, 'patioTable', cx, cy, 1.0, 1.0, 0, { mat: 'wood' });
+          if (table) {
+            add(room, 'patioChair', cx - 0.6, cy, 0.55, 0.55, Math.PI / 2, { mat: 'wood' });
+            add(room, 'patioChair', cx + 0.6, cy, 0.55, 0.55, -Math.PI / 2, { mat: 'wood' });
+            add(room, 'patioChair', cx, cy - 0.6, 0.55, 0.55, 0, { mat: 'wood' });
+            add(room, 'patioChair', cx, cy + 0.6, 0.55, 0.55, Math.PI, { mat: 'wood' });
+            if (room.area >= 10.0) {
+              add(room, 'parasol', cx + 0.8, cy + 0.8, 2.2, 2.2, 0, { mat: 'fabric', decor: true });
+            }
+          }
+          // BBQ Grill
+          const bbq = FC.findWallPlacement(plan, room, wallSegments, 'bbq', 1.15, 0.6, items, doorZones);
+          if (bbq) add(room, 'bbq', bbq.x, bbq.y, bbq.w, bbq.d, bbq.rot, { mat: 'metal' });
+          // Planter box
+          const pb = FC.findWallPlacement(plan, room, wallSegments, 'planterBox', 1.2, 0.35, items, doorZones);
+          if (pb) add(room, 'planterBox', pb.x, pb.y, pb.w, pb.d, pb.rot, { mat: 'wood', decor: true });
+        } else {
+          // Bistro set or sun lounger for balconies and compact patios
+          if (Math.max(W, D) >= 2.2 && Math.min(W, D) <= 1.8) {
+            add(room, 'sunLounger', cx, cy, 0.68, 1.85, D > W ? 0 : Math.PI / 2, { mat: 'fabric' });
+            const pb = FC.findWallPlacement(plan, room, wallSegments, 'planterBox', Math.min(1.2, W * 0.7), 0.32, items, doorZones);
+            if (pb) add(room, 'planterBox', pb.x, pb.y, pb.w, pb.d, pb.rot, { mat: 'wood', decor: true });
+          } else {
+            const table = add(room, 'patioTable', cx, cy, 0.75, 0.75, 0, { mat: 'wood' });
+            if (table) {
+              add(room, 'patioChair', cx - 0.5, cy, 0.5, 0.5, Math.PI / 2, { mat: 'wood' });
+              add(room, 'patioChair', cx + 0.5, cy, 0.5, 0.5, -Math.PI / 2, { mat: 'wood' });
+            }
+            const pb = FC.findWallPlacement(plan, room, wallSegments, 'planterBox', 1.0, 0.32, items, doorZones);
+            if (pb) add(room, 'planterBox', pb.x, pb.y, pb.w, pb.d, pb.rot, { mat: 'wood', decor: true });
+          }
+        }
       } else {
         // Living room in primary zone
         const sofaW = clamp(W * 0.35, 1.8, 2.4);
         const sofaY = y1 - 0.65;
-        if (variant === 0) {
+        if (variant === 0 && room.area >= 16) {
+          // Attempt corner placement for sectional sofa first, else primary zone
+          const secW = Math.min(2.5, sofaW + 0.3);
+          const secCorner = FC.findCornerPlacement(room, 'sectionalSofa', secW, 1.8, items, doorZones, null, wallSegments);
+          if (secCorner) {
+            add(room, 'rug', secCorner.x, secCorner.y, Math.min(3.2, W * 0.7), Math.min(2.4, D * 0.65), secCorner.rot, { mat: 'rug' });
+            add(room, 'sectionalSofa', secCorner.x, secCorner.y, secW, 1.8, secCorner.rot, { mat: 'fabric' });
+            add(room, 'coffeeTable', secCorner.x + 0.4 * Math.cos(secCorner.rot), secCorner.y + 0.4 * Math.sin(secCorner.rot), 1.05, 0.55, secCorner.rot, { mat: 'wood' });
+            const tvW = FC.findWallPlacement(plan, room, wallSegments, 'tvConsole', Math.min(1.9, sofaW), 0.42, items, doorZones);
+            if (tvW) {
+              add(room, 'tvConsole', tvW.x, tvW.y, tvW.w, tvW.d, tvW.rot, { mat: 'wood' });
+              add(room, 'tv', tvW.x, tvW.y, Math.min(1.3, tvW.w * 0.7), 0.07, tvW.rot, { mat: 'screen', elev: 0.92, h: 0.78 });
+            }
+          } else {
+            add(room, 'rug', cx, cy, Math.min(3.2, W * 0.7), Math.min(2.4, D * 0.65), 0, { mat: 'rug' });
+            add(room, 'sectionalSofa', cx, sofaY, secW, 1.8, Math.PI, { mat: 'fabric' });
+            add(room, 'coffeeTable', cx, Math.max(y0 + 1.1, sofaY - 1.15), 1.05, 0.55, 0, { mat: 'wood' });
+            add(room, 'tvConsole', cx, y0 + 0.28, Math.min(1.9, sofaW), 0.42, 0, { mat: 'wood' });
+            add(room, 'tv', cx, y0 + 0.15, Math.min(1.3, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
+          }
+          add(room, 'floorLamp', cx + 1.3, sofaY - 0.15, 0.4, 0.4, 0, { mat: 'metal', decor: true });
+        } else if (variant === 0) {
           add(room, 'rug', cx, cy, Math.min(2.8, sofaW + 0.4), Math.min(2.0, D * 0.6), 0, { mat: 'rug' });
           add(room, 'sofa', cx, sofaY, sofaW, 0.9, Math.PI, { mat: 'fabric' });
           add(room, 'coffeeTable', cx, Math.max(y0 + 1.1, sofaY - 1.15), 1.0, 0.55, 0, { mat: 'wood' });
           add(room, 'tvConsole', cx, y0 + 0.28, Math.min(1.9, sofaW), 0.42, 0, { mat: 'wood' });
           add(room, 'tv', cx, y0 + 0.15, Math.min(1.3, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
+          add(room, 'floorLamp', cx + sofaW / 2 + 0.25, sofaY, 0.4, 0.4, 0, { mat: 'metal', decor: true });
         } else if (variant === 1) {
           add(room, 'rug', cx, cy, Math.min(3.0, sofaW + 0.6), Math.min(2.2, D * 0.65), 0, { mat: 'rug' });
           add(room, 'sofa', cx, sofaY, sofaW, 0.88, Math.PI, { mat: 'fabric' });
           add(room, 'coffeeTable', cx, cy, 1.05, 0.55, 0, { mat: 'wood' });
-          add(room, 'chair', cx - sofaW * 0.35, cy - 0.75, 0.65, 0.65, 0, { mat: 'fabric' });
-          add(room, 'chair', cx + sofaW * 0.35, cy - 0.75, 0.65, 0.65, 0, { mat: 'fabric' });
+          add(room, 'armchair', cx - sofaW * 0.38, cy - 0.75, 0.85, 0.85, 0.15, { mat: 'fabric' });
+          add(room, 'armchair', cx + sofaW * 0.38, cy - 0.75, 0.85, 0.85, -0.15, { mat: 'fabric' });
           add(room, 'tvConsole', cx, y0 + 0.28, Math.min(1.8, sofaW), 0.4, 0, { mat: 'wood' });
+          add(room, 'tv', cx, y0 + 0.15, Math.min(1.3, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
         } else {
           add(room, 'rug', cx, cy, Math.min(3.0, sofaW + 0.5), Math.min(2.2, D * 0.6), 0, { mat: 'rug' });
           add(room, 'sofa', cx, sofaY, sofaW, 0.9, Math.PI, { mat: 'fabric' });
-          add(room, 'chair', cx - sofaW / 2 + 0.3, cy + 0.1, 0.7, 0.7, -Math.PI / 2, { mat: 'fabric' });
+          add(room, 'armchair', cx - sofaW / 2 + 0.2, cy + 0.1, 0.85, 0.85, -Math.PI / 2, { mat: 'fabric' });
           add(room, 'coffeeTable', cx + 0.2, cy, 0.95, 0.55, 0, { mat: 'wood' });
           add(room, 'tvConsole', cx, y0 + 0.26, Math.min(1.9, sofaW), 0.42, 0, { mat: 'wood' });
+          add(room, 'tv', cx, y0 + 0.15, Math.min(1.3, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
         }
 
-        // Perimeter bookshelf / console along available real wall:
+        // Modern linear fireplace along perimeter wall
+        if (room.area >= 18) {
+          const fp = FC.findWallPlacement(plan, room, wallSegments, 'fireplace', 1.2, 0.32, items, doorZones);
+          if (fp) add(room, 'fireplace', fp.x, fp.y, fp.w, fp.d, fp.rot, { mat: 'stone' });
+        }
+
+        // Bookshelf along available wall
         if (room.area >= 18) {
           const bs = FC.findWallPlacement(plan, room, wallSegments, 'bookshelf', 1.4, 0.35, items, doorZones);
           if (bs) add(room, 'bookshelf', bs.x, bs.y, bs.w, bs.d, bs.rot, { mat: 'wood' });
@@ -2447,7 +2976,7 @@
                 add(room, 'pendant', ax, ay, 0.45, 0.45, 0, { mat: 'metal', elev: 2.05, h: 0.4, decor: true });
               }
             } else {
-              add(room, 'chair', ax, ay, 0.75, 0.75, 0, { mat: 'fabric' });
+              add(room, 'armchair', ax, ay, 0.85, 0.85, 0, { mat: 'fabric' });
               add(room, 'tableSmall', ax + 0.7, ay, 0.5, 0.5, 0, { mat: 'wood' });
               add(room, 'floorLamp', ax - 0.55, ay - 0.35, 0.4, 0.4, 0, { mat: 'metal', decor: true });
             }
@@ -2460,7 +2989,17 @@
   };
 
   FC.furnitureCount = function (items) {
-    return (items || []).filter((i) => i.kind !== 'rug' && i.kind !== 'bathMat' && i.kind !== 'pendant' && i.kind !== 'artwork').length;
+    return (items || []).filter(
+      (i) =>
+        i.kind !== 'rug' &&
+        i.kind !== 'bathMat' &&
+        i.kind !== 'pendant' &&
+        i.kind !== 'artwork' &&
+        i.kind !== 'mirrorCabinet' &&
+        i.kind !== 'towelRack' &&
+        i.kind !== 'rangeHood' &&
+        i.kind !== 'fullMirror'
+    ).length;
   };
 
   FC.openingLabel = function (op) {
