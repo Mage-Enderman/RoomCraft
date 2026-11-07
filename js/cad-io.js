@@ -522,7 +522,7 @@
             cadPolylines.push({ pts, closed, layer });
           }
         } else if (entityType === 'INSERT') {
-          let blockName = '', layer = '', ix = 0, iy = 0, rot = 0;
+          let blockName = '', layer = '', ix = 0, iy = 0, rot = 0, scaleX = 1, scaleY = 1;
           while (i < rawLines.length) {
             const peekCode = parseInt(rawLines[i].trim(), 10);
             if (peekCode === 0) break;
@@ -532,8 +532,10 @@
             else if (p.code === 10) ix = parseFloat(p.val) * scale;
             else if (p.code === 20) iy = -parseFloat(p.val) * scale;
             else if (p.code === 50) rot = parseFloat(p.val);
+            else if (p.code === 41) scaleX = parseFloat(p.val);
+            else if (p.code === 42) scaleY = parseFloat(p.val);
           }
-          cadInserts.push({ blockName, layer, x: ix, y: iy, rot });
+          cadInserts.push({ blockName, layer, x: ix, y: iy, rot, scaleX, scaleY });
         }
       }
     }
@@ -787,38 +789,90 @@
         else if (/2FT/i.test(ins.blockName)) w = 0.610;
         else if (/1FT/i.test(ins.blockName)) w = 0.305;
 
+        const theta = (((ins.rot || 0) * Math.PI) / 180);
+        const cos = Math.cos(theta);
+        const sin = Math.sin(theta);
+        const sX = ins.scaleX ?? 1;
+        const sY = ins.scaleY ?? 1;
+
+        // In CAD door blocks, insertion point (ins.x, ins.y) is the hinge on one jamb.
+        // The threshold runs along local X by (w * sX).
+        // Rotated by theta (CAD Y up -> RoomCraft Y inverted):
+        const th_dx = w * sX * cos;
+        const th_dy = -(w * sX * sin);
+        const doorW = Math.hypot(th_dx, th_dy) || w;
+        const th_ux = th_dx / doorW;
+        const th_uy = th_dy / doorW;
+
+        // Leaf direction in RoomCraft coordinates:
+        const leaf_dx = -w * sY * sin;
+        const leaf_dy = -w * sY * cos;
+
+        // True center of the opening:
+        const cx = isDoor ? (ins.x + th_dx / 2) : ins.x;
+        const cy = isDoor ? (ins.y + th_dy / 2) : ins.y;
+
         let bestSeg = null;
         let bestDist = Infinity;
         let bestOffset = 0;
+        let bestHinge = 'left';
+        let bestSwing = 1;
 
         segs.forEach((s) => {
-          const dx = s.b.x - s.a.x, dy = s.b.y - s.a.y;
+          const s_dx = s.b.x - s.a.x, s_dy = s.b.y - s.a.y;
           const len = s.len;
           if (len < 0.2) return;
-          const t = ((ins.x - s.a.x) * dx + (ins.y - s.a.y) * dy) / (len * len);
-          if (t >= -0.05 && t <= 1.05) {
-            const px = s.a.x + Math.max(0, Math.min(1, t)) * dx;
-            const py = s.a.y + Math.max(0, Math.min(1, t)) * dy;
-            const d = Math.hypot(ins.x - px, ins.y - py);
+          const s_ux = s_dx / len;
+          const s_uy = s_dy / len;
+          const s_nx = -s_uy;
+          const s_ny = s_ux;
+
+          // For doors, ensure host segment is parallel to threshold direction
+          if (isDoor) {
+            const dotAlign = Math.abs(th_ux * s_ux + th_uy * s_uy);
+            if (dotAlign < 0.70) return;
+          }
+
+          const t = ((cx - s.a.x) * s_dx + (cy - s.a.y) * s_dy) / (len * len);
+          if (t >= -0.20 && t <= 1.20) {
+            const px = s.a.x + Math.max(0, Math.min(1, t)) * s_dx;
+            const py = s.a.y + Math.max(0, Math.min(1, t)) * s_dy;
+            const d = Math.hypot(cx - px, cy - py);
             if (d < bestDist) {
               bestDist = d;
               bestSeg = s;
-              bestOffset = Math.max(w / 2 + 0.05, Math.min(len - w / 2 - 0.05, t * len));
+              bestOffset = Math.max(doorW / 2 + 0.04, Math.min(len - doorW / 2 - 0.04, t * len));
+
+              // Determine hinge side along segment direction
+              const hingeVec = (ins.x - cx) * s_ux + (ins.y - cy) * s_uy;
+              bestHinge = hingeVec > 0 ? 'right' : 'left';
+
+              // Determine swing direction relative to segment normal (+n vs -n)
+              const swingDot = leaf_dx * s_nx + leaf_dy * s_ny;
+              bestSwing = swingDot >= 0 ? 1 : -1;
             }
           }
         });
 
         if (bestSeg && bestDist < 1.4) {
-          plan.openings.push({
-            id: FC.uid('op'),
-            kind: isDoor ? 'door' : 'window',
-            style: isDoor ? (isSliding ? 'sliding' : (isBifold ? 'bifold' : (isDouble ? 'double' : 'single'))) : 'standard',
-            hostKey: bestSeg.key,
-            offset: FC.round(bestOffset, 3),
-            width: FC.round(w, 3),
-            height: isDoor ? (plan.settings.doorHeight || 2.1) : (plan.settings.windowHeight || 1.2),
-            sill: isDoor ? 0 : (plan.settings.windowSill || 0.9),
-          });
+          // Check for duplicate / overlap with existing opening on this wall
+          const existing = plan.openings.find(
+            (o) => o.hostKey === bestSeg.key && Math.abs(o.offset - bestOffset) < (o.width + doorW) / 2 - 0.05
+          );
+          if (!existing) {
+            plan.openings.push({
+              id: FC.uid('op'),
+              kind: isDoor ? 'door' : 'window',
+              style: isDoor ? (isSliding ? 'sliding' : (isBifold ? 'bifold' : (isDouble ? 'double' : 'single'))) : 'standard',
+              hostKey: bestSeg.key,
+              offset: FC.round(bestOffset, 3),
+              width: FC.round(doorW, 3),
+              height: isDoor ? (plan.settings.doorHeight || 2.1) : (plan.settings.windowHeight || 1.2),
+              sill: isDoor ? 0 : (plan.settings.windowSill || 0.9),
+              hinge: isDoor ? bestHinge : 'left',
+              swingSide: isDoor ? bestSwing : 1,
+            });
+          }
         }
       });
 
@@ -845,7 +899,7 @@
             }
           });
           if (bestSeg && bestDist < 0.6) {
-            const dup = plan.openings.find((o) => o.hostKey === bestSeg.key && Math.abs(o.offset - bestOffset) < 0.5);
+            const dup = plan.openings.find((o) => o.hostKey === bestSeg.key && Math.abs(o.offset - bestOffset) < (o.width + len) / 2);
             if (!dup) {
               plan.openings.push({
                 id: FC.uid('op'),
@@ -856,6 +910,8 @@
                 width: FC.round(len, 3),
                 height: plan.settings.doorHeight || 2.1,
                 sill: 0,
+                hinge: 'left',
+                swingSide: 1,
               });
             }
           }

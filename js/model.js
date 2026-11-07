@@ -377,7 +377,12 @@
     plan.walls = Array.isArray(raw.walls)
       ? raw.walls
           .filter((w) => w && w.a && w.b)
-          .map((w) => ({ id: w.id || FC.uid('w'), a: { x: +w.a.x || 0, y: +w.a.y || 0 }, b: { x: +w.b.x || 0, y: +w.b.y || 0 } }))
+          .map((w) => ({
+            id: w.id || FC.uid('w'),
+            a: { x: +w.a.x || 0, y: +w.a.y || 0 },
+            b: { x: +w.b.x || 0, y: +w.b.y || 0 },
+            virtual: !!w.virtual,
+          }))
       : [];
     plan.openings = Array.isArray(raw.openings)
       ? raw.openings
@@ -624,84 +629,18 @@
 
   FC.rectifyWalls = function (plan) {
     if (!plan || !plan.walls) return;
-
-    for (let pass = 0; pass < 2; pass++) {
-      plan.walls.forEach((w) => {
-        const dx = w.b.x - w.a.x;
-        const dy = w.b.y - w.a.y;
-        const len = Math.hypot(dx, dy);
-        if (len < 0.04) return;
-        const deg = (((Math.atan2(dy, dx) * 180) / Math.PI % 180) + 180) % 180;
-
-        if (deg < 6 || deg > 174 || Math.abs(dy) < 0.08) {
-          const avgY = FC.round((w.a.y + w.b.y) / 2, 3);
-          w.a.y = avgY;
-          w.b.y = avgY;
-        } else if (Math.abs(deg - 90) < 6 || Math.abs(dx) < 0.08) {
-          const avgX = FC.round((w.a.x + w.b.x) / 2, 3);
-          w.a.x = avgX;
-          w.b.x = avgX;
-        } else if (Math.abs(deg - 45) < 5 || Math.abs(deg - 135) < 5) {
-          const signX = w.b.x - w.a.x >= 0 ? 1 : -1;
-          const signY = w.b.y - w.a.y >= 0 ? 1 : -1;
-          const avgD = (Math.abs(dx) + Math.abs(dy)) / 2;
-          w.b.x = FC.round(w.a.x + signX * avgD, 3);
-          w.b.y = FC.round(w.a.y + signY * avgD, 3);
-        }
-      });
-
-      const weldDist = 0.08;
-      for (let i = 0; i < plan.walls.length; i++) {
-        const w1 = plan.walls[i];
-        const isHoriz1 = w1.a.y === w1.b.y;
-        const isVert1 = w1.a.x === w1.b.x;
-
-        for (let j = i + 1; j < plan.walls.length; j++) {
-          const w2 = plan.walls[j];
-          const isHoriz2 = w2.a.y === w2.b.y;
-          const isVert2 = w2.a.x === w2.b.x;
-
-          ['a', 'b'].forEach((k1) => {
-            ['a', 'b'].forEach((k2) => {
-              if (Math.hypot(w1[k1].x - w2[k2].x, w1[k1].y - w2[k2].y) <= weldDist) {
-                if (isHoriz1 && isVert2) {
-                  w1[k1].x = w2[k2].x;
-                  w2[k2].y = w1[k1].y;
-                } else if (isVert1 && isHoriz2) {
-                  w1[k1].y = w2[k2].y;
-                  w2[k2].x = w1[k1].x;
-                } else if (isHoriz1 && isHoriz2) {
-                  const avgY = FC.round((w1[k1].y + w2[k2].y) / 2, 3);
-                  w1.a.y = w1.b.y = w2.a.y = w2.b.y = avgY;
-                  const midX = FC.round((w1[k1].x + w2[k2].x) / 2, 3);
-                  w1[k1].x = w2[k2].x = midX;
-                } else if (isVert1 && isVert2) {
-                  const avgX = FC.round((w1[k1].x + w2[k2].x) / 2, 3);
-                  w1.a.x = w1.b.x = w2.a.x = w2.b.x = avgX;
-                  const midY = FC.round((w1[k1].y + w2[k2].y) / 2, 3);
-                  w1[k1].y = w2[k2].y = midY;
-                } else {
-                  const midX = FC.round((w1[k1].x + w2[k2].x) / 2, 3);
-                  const midY = FC.round((w1[k1].y + w2[k2].y) / 2, 3);
-                  w1[k1].x = w2[k2].x = midX;
-                  w1[k1].y = w2[k2].y = midY;
-                }
-              }
-            });
-          });
-        }
-      }
-    }
-
     plan.walls.forEach((w) => {
-      const deg = (((Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x) * 180) / Math.PI % 180) + 180) % 180;
-      if (deg < 1 || deg > 179) {
+      const dx = Math.abs(w.b.x - w.a.x);
+      const dy = Math.abs(w.b.y - w.a.y);
+      const len = Math.hypot(dx, dy);
+      if (len < 0.04) return;
+      const deg = (((Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x) * 180 / Math.PI) % 180) + 180) % 180;
+      if (deg < 3 || deg > 177 || dy < 0.03) {
         w.b.y = w.a.y;
-      } else if (Math.abs(deg - 90) < 1) {
+      } else if (Math.abs(deg - 90) < 3 || dx < 0.03) {
         w.b.x = w.a.x;
       }
     });
-
     plan.walls = plan.walls.filter((w) => Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) >= 0.05);
   };
 
@@ -718,72 +657,145 @@
     const s = plan.settings || FC.defaultSettings;
     const extThick = options.extThickness || s.extThickness || 0.20;
     const intThick = options.intThickness || s.intThickness || 0.12;
-    // CAD interior walls stop at inside drywall face of exterior walls:
-    // Gap to outer outline is extThick (typically 0.15 - 0.25m).
     const maxExtGap = options.maxExtGap || Math.max(extThick * 1.6, 0.36);
-    // CAD walls meeting other walls stop at drywall face (gap intThick/2 to intThick):
     const maxIntGap = options.maxIntGap || Math.max(intThick * 2.2, 0.28);
     const weldDist = options.weldDist || 0.08;
 
+    // Step 0: Classify wall orientation and make initially orthogonal walls strictly orthogonal
+    walls.forEach((w) => {
+      const dx = Math.abs(w.b.x - w.a.x);
+      const dy = Math.abs(w.b.y - w.a.y);
+      const len = Math.hypot(dx, dy);
+      if (len < 0.04) return;
+      const deg = (((Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x) * 180 / Math.PI) % 180) + 180) % 180;
+      if (deg < 5 || deg > 175 || dy < 0.06) {
+        w.orient = 'H';
+        const avgY = FC.round((w.a.y + w.b.y) / 2, 3);
+        w.a.y = avgY;
+        w.b.y = avgY;
+      } else if (Math.abs(deg - 90) < 5 || dx < 0.06) {
+        w.orient = 'V';
+        const avgX = FC.round((w.a.x + w.b.x) / 2, 3);
+        w.a.x = avgX;
+        w.b.x = avgX;
+      } else {
+        w.orient = 'D';
+      }
+    });
+
     const outSegs = [];
     for (let i = 0; i < outline.length; i++) {
-      outSegs.push({ a: outline[i], b: outline[(i + 1) % outline.length], idx: i });
+      const a = outline[i];
+      const b = outline[(i + 1) % outline.length];
+      const dx = Math.abs(b.x - a.x), dy = Math.abs(b.y - a.y);
+      const orient = dy < 0.04 ? 'H' : (dx < 0.04 ? 'V' : 'D');
+      outSegs.push({ a, b, idx: i, orient });
     }
 
-    // 1. Ray-extension to outline:
-    // If extending a wall forward along its longitudinal vector intersects an outline segment within maxExtGap,
-    // extend that wall endpoint right to the outline intersection point.
+    // Step 1: Align wall lines with nearby parallel outline segments or outline corners
+    // If an entire vertical wall is within extThick of a vertical outline segment/corner, align it
+    walls.forEach((w) => {
+      if (w.orient === 'V') {
+        let bestDist = Infinity, bestX = null;
+        outSegs.forEach((os) => {
+          if (os.orient === 'V') {
+            const d = Math.abs(w.a.x - os.a.x);
+            const minY = Math.min(os.a.y, os.b.y) - maxExtGap;
+            const maxY = Math.max(os.a.y, os.b.y) + maxExtGap;
+            if (d <= maxExtGap && d < bestDist && ((w.a.y >= minY && w.a.y <= maxY) || (w.b.y >= minY && w.b.y <= maxY))) {
+              bestDist = d;
+              bestX = os.a.x;
+            }
+          }
+        });
+        outline.forEach((opt) => {
+          ['a', 'b'].forEach((k) => {
+            const d = Math.hypot(w[k].x - opt.x, w[k].y - opt.y);
+            if (d <= maxExtGap && Math.abs(w.a.x - opt.x) <= extThick * 1.5) {
+              if (Math.abs(w.a.x - opt.x) < bestDist) {
+                bestDist = Math.abs(w.a.x - opt.x);
+                bestX = opt.x;
+              }
+            }
+          });
+        });
+        if (bestX !== null && bestDist <= maxExtGap) {
+          w.a.x = bestX;
+          w.b.x = bestX;
+        }
+      } else if (w.orient === 'H') {
+        let bestDist = Infinity, bestY = null;
+        outSegs.forEach((os) => {
+          if (os.orient === 'H') {
+            const d = Math.abs(w.a.y - os.a.y);
+            const minX = Math.min(os.a.x, os.b.x) - maxExtGap;
+            const maxX = Math.max(os.a.x, os.b.x) + maxExtGap;
+            if (d <= maxExtGap && d < bestDist && ((w.a.x >= minX && w.a.x <= maxX) || (w.b.x >= minX && w.b.x <= maxX))) {
+              bestDist = d;
+              bestY = os.a.y;
+            }
+          }
+        });
+        outline.forEach((opt) => {
+          ['a', 'b'].forEach((k) => {
+            const d = Math.hypot(w[k].x - opt.x, w[k].y - opt.y);
+            if (d <= maxExtGap && Math.abs(w.a.y - opt.y) <= extThick * 1.5) {
+              if (Math.abs(w.a.y - opt.y) < bestDist) {
+                bestDist = Math.abs(w.a.y - opt.y);
+                bestY = opt.y;
+              }
+            }
+          });
+        });
+        if (bestY !== null && bestDist <= maxExtGap) {
+          w.a.y = bestY;
+          w.b.y = bestY;
+        }
+      }
+    });
+
+    // Step 2: Longitudinal ray extension of walls to outline
     walls.forEach((w) => {
       const dx = w.b.x - w.a.x, dy = w.b.y - w.a.y;
       const len = Math.hypot(dx, dy);
       if (len < 0.05) return;
       const ux = dx / len, uy = dy / len;
 
-      // Forward extension of endpoint b (+u)
-      let bestDistB = Infinity, bestPtB = null;
-      outSegs.forEach((os) => {
-        const sx = os.b.x - os.a.x, sy = os.b.y - os.a.y;
-        const denom = ux * sy - uy * sx;
-        if (Math.abs(denom) > 1e-5) {
-          const t = ((os.a.x - w.b.x) * sy - (os.a.y - w.b.y) * sx) / denom;
-          const sParam = ((os.a.x - w.b.x) * uy - (os.a.y - w.b.y) * ux) / denom;
-          if (t >= -0.01 && t <= maxExtGap && sParam >= -0.01 && sParam <= 1.01) {
-            if (t < bestDistB) {
-              bestDistB = t;
-              bestPtB = { x: w.b.x + ux * t, y: w.b.y + uy * t };
-            }
-          }
-        }
-      });
-      if (bestPtB && bestDistB <= maxExtGap) {
-        w.b.x = FC.round(bestPtB.x, 3);
-        w.b.y = FC.round(bestPtB.y, 3);
-      }
+      ['b', 'a'].forEach((k) => {
+        const dir = k === 'b' ? 1 : -1;
+        const curPt = w[k];
+        let bestDist = Infinity, bestPt = null;
 
-      // Backward extension of endpoint a (-u)
-      let bestDistA = Infinity, bestPtA = null;
-      outSegs.forEach((os) => {
-        const sx = os.b.x - os.a.x, sy = os.b.y - os.a.y;
-        const denom = -ux * sy - (-uy) * sx;
-        if (Math.abs(denom) > 1e-5) {
-          const t = ((os.a.x - w.a.x) * sy - (os.a.y - w.a.y) * sx) / denom;
-          const sParam = ((os.a.x - w.a.x) * (-uy) - (os.a.y - w.a.y) * (-ux)) / denom;
-          if (t >= -0.01 && t <= maxExtGap && sParam >= -0.01 && sParam <= 1.01) {
-            if (t < bestDistA) {
-              bestDistA = t;
-              bestPtA = { x: w.a.x - ux * t, y: w.a.y - uy * t };
+        outSegs.forEach((os) => {
+          const sx = os.b.x - os.a.x, sy = os.b.y - os.a.y;
+          const denom = (dir * ux) * sy - (dir * uy) * sx;
+          if (Math.abs(denom) > 1e-5) {
+            const t = ((os.a.x - curPt.x) * sy - (os.a.y - curPt.y) * sx) / denom;
+            const sParam = ((os.a.x - curPt.x) * (dir * uy) - (os.a.y - curPt.y) * (dir * ux)) / denom;
+            const segLen = Math.hypot(sx, sy);
+            const sTol = Math.max(0.05, maxExtGap / segLen);
+            if (t >= -0.01 && t <= maxExtGap && sParam >= -sTol && sParam <= 1 + sTol) {
+              if (t < bestDist) {
+                bestDist = t;
+                let px = curPt.x + dir * ux * t;
+                let py = curPt.y + dir * uy * t;
+                if (w.orient === 'V') px = w.a.x;
+                if (w.orient === 'H') py = w.a.y;
+                bestPt = { x: px, y: py };
+              }
             }
           }
+        });
+
+        if (bestPt && bestDist <= maxExtGap) {
+          w[k].x = FC.round(bestPt.x, 3);
+          w[k].y = FC.round(bestPt.y, 3);
         }
       });
-      if (bestPtA && bestDistA <= maxExtGap) {
-        w.a.x = FC.round(bestPtA.x, 3);
-        w.a.y = FC.round(bestPtA.y, 3);
-      }
     });
 
-    // 2. Intersection extension between interior walls (T-junctions & L-junctions)
-    for (let round = 0; round < 2; round++) {
+    // Step 3: Intersection extension between interior walls
+    for (let round = 0; round < 3; round++) {
       for (let i = 0; i < walls.length; i++) {
         const w1 = walls[i];
         const dx1 = w1.b.x - w1.a.x, dy1 = w1.b.y - w1.a.y;
@@ -798,25 +810,28 @@
           if (len2 < 0.05) continue;
 
           const denom = dx1 * dy2 - dy1 * dx2;
-          if (Math.abs(denom) < 1e-5) continue; // parallel
+          if (Math.abs(denom) < 1e-5) continue;
 
-          // Line-line intersection point P
           const t1 = ((w2.a.x - w1.a.x) * dy2 - (w2.a.y - w1.a.y) * dx2) / denom;
           const t2 = ((w2.a.x - w1.a.x) * dy1 - (w2.a.y - w1.a.y) * dx1) / denom;
 
-          const px = w1.a.x + dx1 * t1;
-          const py = w1.a.y + dy1 * t1;
+          let px = w1.a.x + dx1 * t1;
+          let py = w1.a.y + dy1 * t1;
 
-          // Check if intersection is close to an endpoint of w1
+          if (w1.orient === 'V' && w2.orient === 'H') {
+            px = w1.a.x;
+            py = w2.a.y;
+          } else if (w1.orient === 'H' && w2.orient === 'V') {
+            px = w2.a.x;
+            py = w1.a.y;
+          }
+
           const distToA1 = Math.hypot(px - w1.a.x, py - w1.a.y);
           const distToB1 = Math.hypot(px - w1.b.x, py - w1.b.y);
-          const isNearEnd1 = (distToA1 <= maxIntGap && t1 <= 0.08) || (distToB1 <= maxIntGap && t1 >= 0.92);
-
-          // Check if P falls on or near w2's segment
-          const isWithinW2 = t2 >= -0.15 && t2 <= 1.15;
+          const isNearEnd1 = (distToA1 <= maxIntGap && t1 <= 0.15) || (distToB1 <= maxIntGap && t1 >= 0.85);
+          const isWithinW2 = t2 >= -0.20 && t2 <= 1.20;
 
           if (isNearEnd1 && isWithinW2) {
-            // L-junction check: is P also near an endpoint of w2?
             const distToA2 = Math.hypot(px - w2.a.x, py - w2.a.y);
             const distToB2 = Math.hypot(px - w2.b.x, py - w2.b.y);
             const isNearEnd2 = distToA2 <= maxIntGap || distToB2 <= maxIntGap;
@@ -843,7 +858,7 @@
       }
     }
 
-    // 3. Perpendicular projection fallback for any endpoints still slightly off outline or other walls
+    // Step 4: Perpendicular projection fallback strictly along longitudinal axis
     walls.forEach((w) => {
       ['a', 'b'].forEach((k) => {
         let bestDist = Infinity, bestPt = null;
@@ -855,8 +870,14 @@
           }
         });
         if (bestDist > 1e-4 && bestDist <= maxExtGap && bestPt) {
-          w[k].x = FC.round(bestPt.x, 3);
-          w[k].y = FC.round(bestPt.y, 3);
+          if (w.orient === 'V') {
+            w[k].y = FC.round(bestPt.y, 3);
+          } else if (w.orient === 'H') {
+            w[k].x = FC.round(bestPt.x, 3);
+          } else {
+            w[k].x = FC.round(bestPt.x, 3);
+            w[k].y = FC.round(bestPt.y, 3);
+          }
         }
       });
     });
@@ -873,55 +894,87 @@
           }
         });
         if (bestDist > 1e-4 && bestDist <= maxIntGap && bestPt) {
-          w1[k].x = FC.round(bestPt.x, 3);
-          w1[k].y = FC.round(bestPt.y, 3);
+          if (w1.orient === 'V') {
+            w1[k].y = FC.round(bestPt.y, 3);
+          } else if (w1.orient === 'H') {
+            w1[k].x = FC.round(bestPt.x, 3);
+          } else {
+            w1[k].x = FC.round(bestPt.x, 3);
+            w1[k].y = FC.round(bestPt.y, 3);
+          }
         }
       });
     });
 
-    // 4. Union-Find Cluster Welding: Weld very close endpoints (< weldDist, 0.08m) into unified joints (eliminates double-dots)
-    const pts = [];
-    walls.forEach((w) => { pts.push(w.a); pts.push(w.b); });
-
-    const parent = pts.map((_, idx) => idx);
-    function findRoot(idx) {
-      if (parent[idx] === idx) return idx;
-      return (parent[idx] = findRoot(parent[idx]));
-    }
-    function unionRoots(i1, i2) {
-      const r1 = findRoot(i1);
-      const r2 = findRoot(i2);
-      if (r1 !== r2) parent[r1] = r2;
-    }
-
-    for (let i = 0; i < pts.length; i++) {
-      for (let j = i + 1; j < pts.length; j++) {
-        if (Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y) <= weldDist) {
-          unionRoots(i, j);
+    // Step 5: Corner & joint welding
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < walls.length; i++) {
+        const w1 = walls[i];
+        for (let j = i + 1; j < walls.length; j++) {
+          const w2 = walls[j];
+          ['a', 'b'].forEach((k1) => {
+            ['a', 'b'].forEach((k2) => {
+              if (Math.hypot(w1[k1].x - w2[k2].x, w1[k1].y - w2[k2].y) <= weldDist) {
+                if (w1.orient === 'V' && w2.orient === 'H') {
+                  w1[k1].x = w1.a.x;
+                  w1[k1].y = w2.a.y;
+                  w2[k2].x = w1.a.x;
+                  w2[k2].y = w2.a.y;
+                } else if (w1.orient === 'H' && w2.orient === 'V') {
+                  w1[k1].x = w2.a.x;
+                  w1[k1].y = w1.a.y;
+                  w2[k2].x = w2.a.x;
+                  w2[k2].y = w1.a.y;
+                } else if (w1.orient === 'H' && w2.orient === 'H') {
+                  const avgY = FC.round((w1.a.y + w2.a.y) / 2, 3);
+                  w1.a.y = w1.b.y = w2.a.y = w2.b.y = avgY;
+                  const midX = FC.round((w1[k1].x + w2[k2].x) / 2, 3);
+                  w1[k1].x = w2[k2].x = midX;
+                } else if (w1.orient === 'V' && w2.orient === 'V') {
+                  const avgX = FC.round((w1.a.x + w2.a.x) / 2, 3);
+                  w1.a.x = w1.b.x = w2.a.x = w2.b.x = avgX;
+                  const midY = FC.round((w1[k1].y + w2[k2].y) / 2, 3);
+                  w1[k1].y = w2[k2].y = midY;
+                } else {
+                  const midX = FC.round((w1[k1].x + w2[k2].x) / 2, 3);
+                  const midY = FC.round((w1[k1].y + w2[k2].y) / 2, 3);
+                  w1[k1].x = w2[k2].x = midX;
+                  w1[k1].y = w2[k2].y = midY;
+                }
+              }
+            });
+          });
         }
       }
     }
 
-    const clusters = new Map();
-    for (let i = 0; i < pts.length; i++) {
-      const root = findRoot(i);
-      if (!clusters.has(root)) clusters.set(root, []);
-      clusters.get(root).push(pts[i]);
-    }
-
-    clusters.forEach((members) => {
-      if (members.length <= 1) return;
-      let sumX = 0, sumY = 0;
-      members.forEach((p) => { sumX += p.x; sumY += p.y; });
-      const avgX = FC.round(sumX / members.length, 3);
-      const avgY = FC.round(sumY / members.length, 3);
-      members.forEach((p) => { p.x = avgX; p.y = avgY; });
+    // Snap endpoints to outline vertices within weldDist
+    walls.forEach((w) => {
+      ['a', 'b'].forEach((k) => {
+        outline.forEach((opt) => {
+          if (Math.hypot(w[k].x - opt.x, w[k].y - opt.y) <= weldDist) {
+            if (w.orient === 'V') {
+              w[k].y = opt.y;
+              w[k].x = opt.x;
+              w[k === 'a' ? 'b' : 'a'].x = opt.x;
+            } else if (w.orient === 'H') {
+              w[k].x = opt.x;
+              w[k].y = opt.y;
+              w[k === 'a' ? 'b' : 'a'].y = opt.y;
+            } else {
+              w[k].x = opt.x;
+              w[k].y = opt.y;
+            }
+          }
+        });
+      });
     });
 
-    // 5. Rectify walls so that healing never leaves walls crooked or skewed off orthogonal axes
-    if (FC.rectifyWalls) {
-      FC.rectifyWalls(plan);
-    }
+    // Strict final orthogonal check
+    walls.forEach((w) => {
+      if (w.orient === 'H') w.b.y = w.a.y;
+      if (w.orient === 'V') w.b.x = w.a.x;
+    });
   };
 
   FC.closeWallGaps = function (plan, maxGap) {
@@ -1239,6 +1292,8 @@
       width: Math.min(s.doorWidth, 1.4),
       height: Math.min(s.doorHeight, s.wallHeight - 0.05),
       sill: 0,
+      hinge: 'left',
+      swingSide: 1,
     };
   };
 

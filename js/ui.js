@@ -514,8 +514,9 @@
             ? `<div class="chip-row small" style="margin-top:8px;">
                 ${['single', 'double', 'sliding', 'bifold'].map((s) => `<button class="chip ${op.style === s ? 'active' : ''}" data-action="door-style" data-style="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
               </div>
-              <div class="btn-row" style="margin-top:8px;">
-                <button class="btn soft sm" style="width:100%" data-action="flip-door" data-opening="${op.id}">${I('rotate3d')} Flip door swing</button>
+              <div class="btn-row" style="margin-top:8px; display:flex; gap:6px;">
+                <button class="btn soft sm" style="flex:1" data-action="flip-door-swing" data-opening="${op.id}">${I('rotate3d')} Flip swing</button>
+                <button class="btn soft sm" style="flex:1" data-action="flip-door-hinge" data-opening="${op.id}">${I('rotate')} Hinge (${op.hinge === 'right' ? 'R' : 'L'})</button>
               </div>`
             : ''}
           <div class="sel-help">${op.kind === 'window' ? `Sill <b data-op-sill>${op.sill.toFixed(2)}</b> m · head <b data-op-head>${(op.sill + op.height).toFixed(2)}</b> m — both must stay below the <b data-op-wall>${this.app.plan.settings.wallHeight.toFixed(2)}</b> m wall.` : 'Drag the opening along the wall to reposition it. Click Del badge to remove.'}</div>
@@ -1094,6 +1095,7 @@
           break;
         case 'door-style':
           app.setDoorStyle(el.dataset.style);
+          this.renderSidebar();
           break;
         case 'camera-fit':
           app.viewer.fit(true);
@@ -1127,7 +1129,13 @@
           this.renderAll();
           break;
         case 'flip-door':
-          app.flipDoor();
+        case 'flip-door-swing':
+          app.flipDoor(el.dataset.opening);
+          this.renderSidebar();
+          break;
+        case 'flip-door-hinge':
+          app.flipDoorHinge(el.dataset.opening);
+          this.renderSidebar();
           break;
         case 'rotate-furniture':
           app.rotateSelectedFurniture(Math.PI / 2);

@@ -293,9 +293,16 @@
       }
     }
 
+    _snapshot(plan) {
+      if (!plan) return '';
+      const clone = Object.assign({}, plan);
+      delete clone.updatedAt;
+      return JSON.stringify(clone);
+    }
+
     pushHistory() {
       if (!this.plan) return;
-      const snapshot = JSON.stringify(this.plan);
+      const snapshot = this._snapshot(this.plan);
       if (this._history[this._history.length - 1] === snapshot) return;
       this._history.push(snapshot);
       if (this._history.length > MAX_HISTORY) this._history.shift();
@@ -304,6 +311,9 @@
     }
 
     canUndo() {
+      if (this.editor && (this.ui.tool === 'wall' || this.ui.tool === 'divider') && this.editor.wallChain && this.editor.chainJustStarted) {
+        return true;
+      }
       return this._history.length > 0;
     }
 
@@ -312,8 +322,15 @@
     }
 
     undo() {
+      if (this.editor && (this.ui.tool === 'wall' || this.ui.tool === 'divider') && this.editor.wallChain && this.editor.chainJustStarted) {
+        this.editor.endWallChain();
+        this.editor.draw();
+        this.toast('Wall cancelled', 'info');
+        if (this.ui && this.ui.updateUndoRedo) this.ui.updateUndoRedo();
+        return;
+      }
       if (!this._history.length) return;
-      const current = JSON.stringify(this.plan);
+      const current = this._snapshot(this.plan);
       const snapshot = this._history.pop();
       this._future.push(current);
       this._restore(snapshot);
@@ -322,7 +339,7 @@
 
     redo() {
       if (!this._future.length) return;
-      const current = JSON.stringify(this.plan);
+      const current = this._snapshot(this.plan);
       const snapshot = this._future.pop();
       this._history.push(current);
       this._restore(snapshot);
@@ -342,17 +359,38 @@
       this.plan.rooms = this._roomMeta();
       this.recomputeFurniture();
       if (this.editor) {
-        this.editor.wallChain = null;
-        this.editor.chainFirst = null;
+        const isWallTool = this.ui && (this.ui.tool === 'wall' || this.ui.tool === 'divider');
+        if (isWallTool && this.editor.wallChain) {
+          const walls = this.plan.walls || [];
+          if (walls.length) {
+            const lastW = walls[walls.length - 1];
+            this.editor.wallChain = { x: lastW.b.x, y: lastW.b.y };
+            this.editor.chainJustStarted = false;
+          } else {
+            this.editor.wallChain = null;
+            this.editor.chainFirst = null;
+            this.editor.chainJustStarted = false;
+          }
+        } else {
+          this.editor.wallChain = null;
+          this.editor.chainFirst = null;
+          this.editor.chainJustStarted = false;
+        }
         this.editor.lengthBuffer = '';
         this.editor.snap = null;
         this.editor.drag = null;
       }
       if (this.ui) {
-        this.ui.drawingFresh = false;
+        const outlineLen = this.plan.outline ? this.plan.outline.length : 0;
+        if (this.ui.tool === 'outline' && this.ui.drawingFresh) {
+          this.ui.drawingFresh = outlineLen > 0;
+        } else {
+          this.ui.drawingFresh = false;
+        }
         this.ui.selection = null;
         this.ui.renderAll();
       }
+      if (this.editor) this.editor.draw();
       if (this.viewer) this.viewer.markDirty();
       this.saveSoon();
     }
@@ -865,19 +903,39 @@
       }
     }
 
-    flipDoor() {
-      const sel = this.ui.selection;
-      if (!sel || sel.type !== 'opening') return;
-      const op = this.plan.openings.find((o) => o.id === sel.id);
-      if (!op) return;
+    flipDoor(id) {
+      const targetId = id || (this.ui.selection && this.ui.selection.type === 'opening' ? this.ui.selection.id : null);
+      if (!targetId) return;
+      const op = this.plan.openings.find((o) => o.id === targetId);
+      if (!op || op.kind !== 'door') return;
       this.pushHistory();
-      if (op.kind === 'door') {
-        const styles = ['single', 'double', 'sliding', 'bifold'];
-        const nextIdx = (styles.indexOf(op.style || 'single') + 1) % styles.length;
-        op.style = styles[nextIdx];
-      }
+      // Toggle swing side (+normal vs -normal)
+      op.swingSide = op.swingSide === -1 ? 1 : -1;
       this.changed({ furniture: false, save: true });
-      this.toast('Door updated (' + op.style + ')', 'info');
+      this.toast('Door swing flipped', 'info');
+    }
+
+    flipDoorHinge(id) {
+      const targetId = id || (this.ui.selection && this.ui.selection.type === 'opening' ? this.ui.selection.id : null);
+      if (!targetId) return;
+      const op = this.plan.openings.find((o) => o.id === targetId);
+      if (!op || op.kind !== 'door') return;
+      this.pushHistory();
+      // Toggle hinge (left vs right)
+      op.hinge = op.hinge === 'right' ? 'left' : 'right';
+      this.changed({ furniture: false, save: true });
+      this.toast('Door hinge flipped (' + op.hinge + ')', 'info');
+    }
+
+    setDoorStyle(style, id) {
+      const targetId = id || (this.ui.selection && this.ui.selection.type === 'opening' ? this.ui.selection.id : null);
+      if (!targetId) return;
+      const op = this.plan.openings.find((o) => o.id === targetId);
+      if (!op || op.kind !== 'door') return;
+      this.pushHistory();
+      op.style = style;
+      this.changed({ furniture: false, save: true });
+      this.toast('Door style: ' + style, 'info');
     }
 
     placeDoorAt(hostKey, offset) {

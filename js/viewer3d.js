@@ -469,14 +469,16 @@
         box(f, h, frameD, cx + w / 2 - f / 2, h / 2, 0, trimMat);
         box(w, f, frameD, cx, h, 0, trimMat);
 
+        const swingSign = pl.op.swingSide === -1 ? -1 : 1;
+
         if (pl.op.style === 'sliding') {
           const panelW = w / 2 - 0.03;
           const panelH = h - 0.07;
           const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(style.linen), roughness: 0.7, transparent: true, opacity: 0.94 });
-          box(panelW, panelH, 0.035, cx - w / 4, panelH / 2 + 0.01, -0.025, mat);
-          box(panelW, panelH, 0.035, cx + w / 4, panelH / 2 + 0.01, 0.025, mat);
-          box(0.018, 0.4, 0.02, cx - 0.06, 1.05, 0.055, trimMat);
-          box(0.018, 0.4, 0.02, cx + 0.06, 1.05, -0.055, trimMat);
+          box(panelW, panelH, 0.035, cx - w / 4, panelH / 2 + 0.01, -0.025 * swingSign, mat);
+          box(panelW, panelH, 0.035, cx + w / 4, panelH / 2 + 0.01, 0.025 * swingSign, mat);
+          box(0.018, 0.4, 0.02, cx - 0.06, 1.05, 0.055 * swingSign, trimMat);
+          box(0.018, 0.4, 0.02, cx + 0.06, 1.05, -0.055 * swingSign, trimMat);
         } else if (pl.op.style === 'bifold') {
           // Double bifold closet door: 4 folding leaves
           const leafW = (w - 0.08) / 4;
@@ -487,7 +489,7 @@
 
           const gL1 = new THREE.Group();
           gL1.position.set(cx - w / 2 + 0.04, 0, 0);
-          gL1.rotation.y = fold;
+          gL1.rotation.y = fold * swingSign;
           const mL1 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
           mL1.position.set(leafW / 2, leafH / 2 + 0.02, 0);
           mL1.castShadow = true;
@@ -495,21 +497,21 @@
 
           const gL2 = new THREE.Group();
           gL2.position.set(leafW, 0, 0);
-          gL2.rotation.y = -fold * 2;
+          gL2.rotation.y = -fold * 2 * swingSign;
           const mL2 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
           mL2.position.set(leafW / 2, leafH / 2 + 0.02, 0);
           mL2.castShadow = true;
           gL2.add(mL2);
 
           const handleL = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.16, 8), trimMat);
-          handleL.position.set(leafW - 0.04, 1.05, 0.028);
+          handleL.position.set(leafW - 0.04, 1.05, 0.028 * swingSign);
           gL2.add(handleL);
           gL1.add(gL2);
           group.add(gL1);
 
           const gR1 = new THREE.Group();
           gR1.position.set(cx + w / 2 - 0.04, 0, 0);
-          gR1.rotation.y = -fold;
+          gR1.rotation.y = -fold * swingSign;
           const mR1 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
           mR1.position.set(-leafW / 2, leafH / 2 + 0.02, 0);
           mR1.castShadow = true;
@@ -517,14 +519,14 @@
 
           const gR2 = new THREE.Group();
           gR2.position.set(-leafW, 0, 0);
-          gR2.rotation.y = fold * 2;
+          gR2.rotation.y = fold * 2 * swingSign;
           const mR2 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
           mR2.position.set(-leafW / 2, leafH / 2 + 0.02, 0);
           mR2.castShadow = true;
           gR2.add(mR2);
 
           const handleR = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.16, 8), trimMat);
-          handleR.position.set(-leafW + 0.04, 1.05, 0.028);
+          handleR.position.set(-leafW + 0.04, 1.05, 0.028 * swingSign);
           gR2.add(handleR);
           gR1.add(gR2);
           group.add(gR1);
@@ -533,11 +535,14 @@
           const leafW = (w - 0.08) / leaves;
           const leafH = h - 0.06;
           for (let i = 0; i < leaves; i++) {
-            const side = i === 0 ? 1 : -1;
+            let side = i === 0 ? 1 : -1;
+            if (leaves === 1) {
+              side = pl.op.hinge === 'right' ? -1 : 1;
+            }
             const hingeX = side > 0 ? cx - w / 2 + 0.04 : cx + w / 2 - 0.04;
             const hinge = new THREE.Group();
             hinge.position.set(hingeX, 0, 0);
-            hinge.rotation.y = side * 0.82;
+            hinge.rotation.y = side * swingSign * 0.82;
             const leaf = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.042), woodMat);
             leaf.position.set((side > 0 ? 1 : -1) * leafW / 2, leafH / 2 + 0.02, 0);
             leaf.castShadow = true;
@@ -548,10 +553,10 @@
               new THREE.BoxGeometry(leafW - 0.14, leafH - 0.28, 0.008),
               new THREE.MeshStandardMaterial({ color: new THREE.Color(style.cabinet), roughness: 0.72 })
             );
-            inset.position.set((side > 0 ? 1 : -1) * leafW / 2, leafH / 2 + 0.02, 0.024);
+            inset.position.set((side > 0 ? 1 : -1) * leafW / 2, leafH / 2 + 0.02, 0.024 * swingSign);
             hinge.add(inset);
             const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), trimMat);
-            knob.position.set((side > 0 ? 1 : -1) * (leafW - 0.1), 1.02, 0.05);
+            knob.position.set((side > 0 ? 1 : -1) * (leafW - 0.1), 1.02, 0.05 * swingSign);
             hinge.add(knob);
             group.add(hinge);
           }

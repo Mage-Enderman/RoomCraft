@@ -33,6 +33,7 @@
       this.drag = null;
       this.wallChain = null;
       this.chainFirst = null;
+      this.chainJustStarted = false;
       this.lengthBuffer = '';
       this.lastAngle = 0;
       this.hoverOpeningWall = null;
@@ -362,11 +363,23 @@
           e.stopPropagation();
           return;
         }
-        if (e.key === 'Backspace' && this.lengthBuffer) {
-          this.lengthBuffer = this.lengthBuffer.slice(0, -1);
-          this.draw();
-          e.preventDefault();
-          return;
+        if (e.key === 'Backspace') {
+          if (this.lengthBuffer) {
+            this.lengthBuffer = this.lengthBuffer.slice(0, -1);
+            this.draw();
+            e.preventDefault();
+            return;
+          }
+          if (tool === 'outline' && this.app.ui.drawingFresh && this.app.plan.outline && this.app.plan.outline.length > 0) {
+            this.app.undo();
+            e.preventDefault();
+            return;
+          }
+          if ((tool === 'wall' || tool === 'divider') && this.wallChain) {
+            this.app.undo();
+            e.preventDefault();
+            return;
+          }
         }
         if (e.key === 'Enter' && this.lengthBuffer) {
           const p = this.typedPoint(from);
@@ -478,8 +491,10 @@
         if (!this.wallChain) {
           this.wallChain = { x: snap.point.x, y: snap.point.y };
           this.chainFirst = { x: snap.point.x, y: snap.point.y };
+          this.chainJustStarted = true;
           this.snap = snap;
           this.draw();
+          if (this.app.ui && this.app.ui.updateUndoRedo) this.app.ui.updateUndoRedo();
           return;
         }
         if (FC.dist(this.wallChain, snap.point) > 0.12) {
@@ -539,6 +554,9 @@
         } else if (badgeHit.action === 'flip') {
           this.app.select({ type: 'opening', id: badgeHit.op.id });
           this.app.flipDoor();
+        } else if (badgeHit.action === 'hinge') {
+          this.app.select({ type: 'opening', id: badgeHit.op.id });
+          this.app.flipDoorHinge();
         }
         return;
       }
@@ -614,6 +632,8 @@
           this.app.pushHistory();
           this.app.ui.drawingFresh = true;
           this.app.plan.outline = [];
+        } else {
+          this.app.pushHistory();
         }
         if (!this._outlinePushed) {
           this._outlinePushed = true;
@@ -644,6 +664,7 @@
       });
       if (dup) return;
       this.app.pushHistory();
+      this.chainJustStarted = false;
       const wallObj = {
         id: FC.uid('w'),
         a: { x: FC.round(a.x, 3), y: FC.round(a.y, 3) },
@@ -652,12 +673,14 @@
       if (virtual || this.app.ui.tool === 'divider') wallObj.virtual = true;
       plan.walls.push(wallObj);
       this.app.changed({ rooms: true, furniture: true, save: false });
+      this.app.saveSoon();
       this.app.ui.updateHint();
     }
 
     endWallChain() {
       this.wallChain = null;
       this.chainFirst = null;
+      this.chainJustStarted = false;
       this.lengthBuffer = '';
       this.snap = null;
       this.app.changed({ rooms: true, furniture: true, save: true });
@@ -1155,9 +1178,14 @@
       const s = this.w2s({ x: pl.x, y: pl.y });
       const badgeY = s.y - 28;
       const sw = this.w2s(w);
-      if (Math.abs(sw.y - badgeY) <= 18) {
-        if (sw.x >= s.x - 52 && sw.x <= s.x - 6) return { op, action: 'delete' };
-        if (sw.x >= s.x + 6 && sw.x <= s.x + 52) return { op, action: 'flip' };
+      if (Math.abs(sw.y - badgeY) <= 14) {
+        if (op.kind === 'door') {
+          if (sw.x >= s.x - 74 && sw.x <= s.x - 30) return { op, action: 'delete' };
+          if (sw.x >= s.x - 22 && sw.x <= s.x + 22) return { op, action: 'flip' };
+          if (sw.x >= s.x + 30 && sw.x <= s.x + 74) return { op, action: 'hinge' };
+        } else {
+          if (sw.x >= s.x - 22 && sw.x <= s.x + 22) return { op, action: 'delete' };
+        }
       }
       return null;
     }
@@ -1239,6 +1267,11 @@
             label: 'Flip door swing',
             icon: 'refresh',
             action: () => this.app.flipDoor(),
+          });
+          items.push({
+            label: 'Flip door hinge',
+            icon: 'refresh',
+            action: () => this.app.flipDoorHinge(),
           });
           items.push({
             label: 'Single door',
@@ -1667,24 +1700,41 @@
             ctx.fill();
           });
 
-          // Draw inline action badges: [Del] and [Flip]
+          // Draw inline action badges: [Del], [Flip], [Hinge]
           const badgeY = s.y - 28;
-          // Delete badge
-          this.roundRect(s.x - 46, badgeY - 10, 38, 20, 5);
-          ctx.fillStyle = '#ef4444';
-          ctx.fill();
-          ctx.fillStyle = '#ffffff';
           ctx.font = 'bold 10.5px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText('Del', s.x - 27, badgeY);
 
-          // Flip badge
-          this.roundRect(s.x + 8, badgeY - 10, 38, 20, 5);
-          ctx.fillStyle = '#374151';
-          ctx.fill();
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText('Flip', s.x + 27, badgeY);
+          if (op.kind === 'door') {
+            // Delete badge
+            this.roundRect(s.x - 72, badgeY - 10, 40, 20, 5);
+            ctx.fillStyle = '#ef4444';
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('Del', s.x - 52, badgeY);
+
+            // Flip swing badge
+            this.roundRect(s.x - 20, badgeY - 10, 40, 20, 5);
+            ctx.fillStyle = '#374151';
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('Flip', s.x, badgeY);
+
+            // Hinge badge
+            this.roundRect(s.x + 32, badgeY - 10, 40, 20, 5);
+            ctx.fillStyle = '#374151';
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('Hinge', s.x + 52, badgeY);
+          } else {
+            // Delete badge only for windows / openings
+            this.roundRect(s.x - 20, badgeY - 10, 40, 20, 5);
+            ctx.fillStyle = '#ef4444';
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('Del', s.x, badgeY);
+          }
 
           ctx.restore();
         }
@@ -1709,15 +1759,16 @@
 
       if (pl.op.style === 'sliding') {
         const gap = 3;
+        const sign = pl.op.swingSide === -1 ? -1 : 1;
         ctx.strokeStyle = active ? ACCENT : '#55555c';
         ctx.lineWidth = 2.2;
         ctx.beginPath();
-        ctx.moveTo(s.x - dir.x * half, s.y - dir.y * half + gap);
-        ctx.lineTo(s.x + dir.x * half * 0.05, s.y + dir.y * half * 0.05 + gap);
+        ctx.moveTo(s.x - dir.x * half + n.x * gap * sign, s.y - dir.y * half + n.y * gap * sign);
+        ctx.lineTo(s.x + dir.x * half * 0.05 + n.x * gap * sign, s.y + dir.y * half * 0.05 + n.y * gap * sign);
         ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(s.x - dir.x * half * 0.05, s.y - dir.y * half * 0.05 - gap);
-        ctx.lineTo(s.x + dir.x * half, s.y + dir.y * half - gap);
+        ctx.moveTo(s.x - dir.x * half * 0.05 - n.x * gap * sign, s.y - dir.y * half * 0.05 - n.y * gap * sign);
+        ctx.lineTo(s.x + dir.x * half - n.x * gap * sign, s.y + dir.y * half - n.y * gap * sign);
         ctx.stroke();
         ctx.restore();
         return;
@@ -1726,16 +1777,17 @@
       if (pl.op.style === 'bifold') {
         const quarter = half / 2;
         const foldDepth = Math.min(quarter * 0.75, 12);
+        const sign = pl.op.swingSide === -1 ? -1 : 1;
         ctx.strokeStyle = active ? ACCENT : '#2b2a30';
         ctx.lineWidth = 2.4;
         ctx.beginPath();
         ctx.moveTo(s.x - dir.x * half, s.y - dir.y * half);
-        ctx.lineTo(s.x - dir.x * quarter - n.x * foldDepth, s.y - dir.y * quarter - n.y * foldDepth);
+        ctx.lineTo(s.x - dir.x * quarter + n.x * foldDepth * sign, s.y - dir.y * quarter + n.y * foldDepth * sign);
         ctx.lineTo(s.x, s.y);
         ctx.stroke();
         ctx.beginPath();
         ctx.moveTo(s.x, s.y);
-        ctx.lineTo(s.x + dir.x * quarter - n.x * foldDepth, s.y + dir.y * quarter - n.y * foldDepth);
+        ctx.lineTo(s.x + dir.x * quarter + n.x * foldDepth * sign, s.y + dir.y * quarter + n.y * foldDepth * sign);
         ctx.lineTo(s.x + dir.x * half, s.y + dir.y * half);
         ctx.stroke();
         ctx.restore();
@@ -1743,14 +1795,22 @@
       }
 
       if (pl.op.style === 'double') {
+        const sign = pl.op.swingSide === -1 ? -1 : 1;
         [-1, 1].forEach((k) => {
           const hinge = { x: s.x + dir.x * half * k, y: s.y + dir.y * half * k };
-          const a0 = Math.atan2(dir.y * -k, dir.x * -k);
+          const closedDir = { x: -dir.x * k, y: -dir.y * k };
+          const openDir = { x: n.x * sign, y: n.y * sign };
+          const aClosed = Math.atan2(closedDir.y, closedDir.x);
+          const aOpen = Math.atan2(openDir.y, openDir.x);
+          const cross = closedDir.x * openDir.y - closedDir.y * openDir.x;
+          const anticlockwise = cross < 0;
+
           ctx.beginPath();
-          ctx.arc(hinge.x, hinge.y, w / 2, a0, a0 + Math.PI / 2, k < 0);
+          ctx.arc(hinge.x, hinge.y, w / 2, aClosed, aOpen, anticlockwise);
           ctx.stroke();
-          const ox = hinge.x + n.x * (w / 2) * Math.sin(Math.PI / 2);
-          const oy = hinge.y + n.y * (w / 2) * Math.sin(Math.PI / 2);
+
+          const ox = hinge.x + openDir.x * (w / 2);
+          const oy = hinge.y + openDir.y * (w / 2);
           ctx.beginPath();
           ctx.moveTo(hinge.x, hinge.y);
           ctx.lineTo(ox, oy);
@@ -1760,16 +1820,25 @@
         return;
       }
 
-      const right = pl.op.hinge === 'right';
-      const hinge = right ? { x: s.x + dir.x * half, y: s.y + dir.y * half } : { x: s.x - dir.x * half, y: s.y - dir.y * half };
+      const isRight = pl.op.hinge === 'right';
+      const sign = pl.op.swingSide === -1 ? -1 : 1;
+      const hinge = isRight
+        ? { x: s.x + dir.x * half, y: s.y + dir.y * half }
+        : { x: s.x - dir.x * half, y: s.y - dir.y * half };
       const radius = w;
-      const startAngle = right ? Math.atan2(-dir.y, -dir.x) : Math.atan2(dir.y, dir.x);
+      const closedDir = isRight ? { x: -dir.x, y: -dir.y } : { x: dir.x, y: dir.y };
+      const openDir = { x: n.x * sign, y: n.y * sign };
+
+      const aClosed = Math.atan2(closedDir.y, closedDir.x);
+      const aOpen = Math.atan2(openDir.y, openDir.x);
+      const cross = closedDir.x * openDir.y - closedDir.y * openDir.x;
+      const anticlockwise = cross < 0;
+
       ctx.beginPath();
-      ctx.arc(hinge.x, hinge.y, radius, startAngle, startAngle + Math.PI / 2, false);
+      ctx.arc(hinge.x, hinge.y, radius, aClosed, aOpen, anticlockwise);
       ctx.stroke();
 
-      const leafDir = right ? { x: n.x, y: n.y } : { x: n.x, y: n.y };
-      const open = { x: hinge.x + leafDir.x * radius, y: hinge.y + leafDir.y * radius };
+      const open = { x: hinge.x + openDir.x * radius, y: hinge.y + openDir.y * radius };
       ctx.strokeStyle = active ? ACCENT : '#3b3b42';
       ctx.lineWidth = 2.4;
       ctx.beginPath();
