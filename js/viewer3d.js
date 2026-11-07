@@ -26,6 +26,9 @@
       this.world = null;
       this.structure = null;
       this.furnitureGroup = null;
+      this.furnitureMeshes = new Map();
+      this.selectionGizmo = null;
+      this.raycaster = null;
       this.ceilingGroup = null;
       this.roomLights = [];
       this.wallMats = [];
@@ -203,6 +206,7 @@
       if (plan.furnished) this.buildFurniture(plan, this.app.furniture || [], style, H);
       if (plan.view && plan.view.ceiling) this.buildCeiling(plan, this.app.rooms || [], style, H);
       this.buildLights(plan);
+      this.updateSelectionGizmo();
       this.needsBuild = false;
       this.needsRender = true;
       this.applyXray(plan.view && plan.view.xray);
@@ -568,9 +572,22 @@
 
     buildFurniture(plan, items, style, H) {
       const group = new THREE.Group();
+      this.furnitureMeshes = new Map();
       items.forEach((item) => {
         try {
           const g = FC.buildFurniture3D(item, style, H);
+          g.userData = Object.assign(g.userData || {}, {
+            isFurniture: true,
+            furnitureId: item.id,
+          });
+          if (typeof g.traverse === 'function') {
+            g.traverse((node) => {
+              node.userData = Object.assign(node.userData || {}, {
+                furnitureId: item.id,
+              });
+            });
+          }
+          this.furnitureMeshes.set(item.id, g);
           group.add(g);
         } catch (err) {
           /* Keep the house usable even if one item fails */
@@ -578,6 +595,123 @@
       });
       this.furnitureGroup = group;
       this.world.add(group);
+    }
+
+    syncFurnitureTransform(item) {
+      if (!item) return;
+      const g = this.furnitureMeshes && this.furnitureMeshes.get(item.id);
+      if (g && g.position && g.rotation) {
+        g.position.set(item.x, 0.002, item.y);
+        g.rotation.y = -(item.rot || 0);
+      }
+      if (
+        this.selectionGizmo &&
+        this.selectionGizmo.userData &&
+        this.selectionGizmo.userData.furnitureId === item.id &&
+        this.selectionGizmo.position &&
+        this.selectionGizmo.rotation
+      ) {
+        this.selectionGizmo.position.set(item.x, 0.005, item.y);
+        this.selectionGizmo.rotation.y = -(item.rot || 0);
+      } else {
+        this.updateSelectionGizmo();
+      }
+      this.needsRender = true;
+    }
+
+    updateSelectionGizmo() {
+      if (this.selectionGizmo) {
+        disposeObject(this.selectionGizmo);
+        this.selectionGizmo = null;
+      }
+      if (!this.world || !this.app || !this.app.ui) return;
+      const sel = this.app.ui.selection;
+      if (!sel || sel.type !== 'furniture' || !this.app.plan || !this.app.plan.furnished) {
+        this.needsRender = true;
+        return;
+      }
+      const item = (this.app.furniture || []).find((f) => f.id === sel.id);
+      if (!item) return;
+
+      const gizmo = new THREE.Group();
+      gizmo.userData = { isGizmo: true, furnitureId: item.id };
+      gizmo.position.set(item.x, 0.005, item.y);
+      gizmo.rotation.y = -(item.rot || 0);
+
+      const w = (item.w || 0.8) + 0.08;
+      const d = (item.d || 0.8) + 0.08;
+      const h = Math.max(0.06, item.h || 0.75);
+      const elev = item.elev || 0;
+
+      // 3D selection wireframe box
+      const boxGeo = new THREE.BoxGeometry(w, h, d);
+      const edgeGeo = new THREE.EdgesGeometry(boxGeo);
+      const edgeMat = new THREE.LineBasicMaterial({
+        color: 0x5b4bf6,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const wireBox = new THREE.LineSegments(edgeGeo, edgeMat);
+      wireBox.position.set(0, elev + h / 2, 0);
+      gizmo.add(wireBox);
+      if (boxGeo && typeof boxGeo.dispose === 'function') boxGeo.dispose();
+
+      // Subtle translucent floor footprint highlight
+      const plateGeo = new THREE.PlaneGeometry(w, d);
+      if (typeof plateGeo.rotateX === 'function') plateGeo.rotateX(-Math.PI / 2);
+      const plateMat = new THREE.MeshBasicMaterial({
+        color: 0x5b4bf6,
+        transparent: true,
+        opacity: 0.16,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const plate = new THREE.Mesh(plateGeo, plateMat);
+      plate.position.set(0, 0.006, 0);
+      plate.userData = { furnitureId: item.id };
+      gizmo.add(plate);
+
+      // Interactive 3D rotation handle extending from front (+Z in local furniture space)
+      const stemLen = 0.42;
+      const handleZ = d / 2 + stemLen;
+      const handleY = Math.min(0.22, Math.max(0.05, elev + 0.05));
+      const accentMat = new THREE.MeshBasicMaterial({ color: 0x5b4bf6 });
+      const whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+      const stemGeo = new THREE.CylinderGeometry(0.015, 0.015, stemLen, 10);
+      if (typeof stemGeo.rotateX === 'function') stemGeo.rotateX(Math.PI / 2);
+      const stem = new THREE.Mesh(stemGeo, accentMat);
+      stem.position.set(0, handleY, d / 2 + stemLen / 2);
+      stem.userData = { isRotateHandle: true, furnitureId: item.id };
+      gizmo.add(stem);
+
+      const knobGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.036, 24);
+      const knob = new THREE.Mesh(knobGeo, accentMat);
+      knob.position.set(0, handleY, handleZ);
+      knob.userData = { isRotateHandle: true, furnitureId: item.id };
+      gizmo.add(knob);
+
+      const innerGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.042, 20);
+      const inner = new THREE.Mesh(innerGeo, whiteMat);
+      inner.position.set(0, handleY, handleZ);
+      inner.userData = { isRotateHandle: true, furnitureId: item.id };
+      gizmo.add(inner);
+
+      // Invisible enlarged hit target for comfortable pointer grabbing
+      const hitGeo = new THREE.SphereGeometry(0.22, 12, 12);
+      const hitMat = new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      const hitSphere = new THREE.Mesh(hitGeo, hitMat);
+      hitSphere.position.set(0, handleY, handleZ);
+      hitSphere.userData = { isRotateHandle: true, furnitureId: item.id };
+      gizmo.add(hitSphere);
+
+      this.selectionGizmo = gizmo;
+      this.world.add(gizmo);
+      this.needsRender = true;
     }
 
     buildCeiling(plan, rooms, style, H) {
@@ -717,6 +851,7 @@
 
       for (const child of this.world.children) {
         if (child === this.ground || child === this.grid || child.isGridHelper) continue;
+        if (child === this.selectionGizmo || (child.userData && child.userData.isGizmo)) continue;
         if (child.isLight) continue;
         exportScene.add(child.clone(true));
       }
@@ -836,15 +971,133 @@
     }
 
     /* ---------------------------------------------------------------- */
+    /* Raycasting & 3D interaction                                      */
+    /* ---------------------------------------------------------------- */
+
+    _updateRaycaster(e) {
+      if (!this.raycaster) this.raycaster = new THREE.Raycaster();
+      const rect = this.canvas.getBoundingClientRect();
+      const w = Math.max(1, rect.width);
+      const h = Math.max(1, rect.height);
+      const ndcX = ((e.clientX - rect.left) / w) * 2 - 1;
+      const ndcY = -((e.clientY - rect.top) / h) * 2 + 1;
+      this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
+      return this.raycaster;
+    }
+
+    hitRotateHandle3D(e) {
+      if (!this.selectionGizmo || !this.camera) return null;
+      const rc = this._updateRaycaster(e);
+      if (typeof rc.intersectObjects !== 'function') return null;
+      const hits = rc.intersectObjects(this.selectionGizmo.children || [], true);
+      if (!Array.isArray(hits)) return null;
+      for (const h of hits) {
+        let obj = h.object;
+        while (obj) {
+          if (obj.userData && obj.userData.isRotateHandle) {
+            const id = obj.userData.furnitureId;
+            return (this.app.furniture || []).find((f) => f.id === id) || null;
+          }
+          obj = obj.parent;
+        }
+      }
+      return null;
+    }
+
+    hitFurniture3D(e) {
+      if (!this.furnitureGroup || !this.camera || !this.app.plan || !this.app.plan.furnished) return null;
+      const rc = this._updateRaycaster(e);
+      if (typeof rc.intersectObjects !== 'function') return null;
+      const hits = rc.intersectObjects(this.furnitureGroup.children || [], true);
+      if (!Array.isArray(hits) || !hits.length) return null;
+      for (const h of hits) {
+        let obj = h.object;
+        while (obj && obj !== this.furnitureGroup) {
+          if (obj.userData && obj.userData.furnitureId) {
+            const item = (this.app.furniture || []).find((f) => f.id === obj.userData.furnitureId);
+            if (item) return { item, point: h.point, distance: h.distance };
+          }
+          obj = obj.parent;
+        }
+      }
+      return null;
+    }
+
+    intersectFloorPlane(e, planeY = 0) {
+      if (!this.camera) return null;
+      const rc = this._updateRaycaster(e);
+      const ray = rc && rc.ray;
+      if (!ray || !ray.origin || !ray.direction) return null;
+      const dy = ray.direction.y;
+      if (Math.abs(dy) < 1e-5) return null;
+      const t = (planeY - ray.origin.y) / dy;
+      if (t < 0) return null;
+      return {
+        x: ray.origin.x + ray.direction.x * t,
+        y: planeY,
+        z: ray.origin.z + ray.direction.z * t,
+      };
+    }
+
+    /* ---------------------------------------------------------------- */
     /* Camera + loop                                                    */
     /* ---------------------------------------------------------------- */
 
     onDown(e) {
-      if (!this.active) return;
+      if (!this.active || this.isTransitioning) return;
+      if (document.body && document.body.classList && document.body.classList.contains('has-overlay')) return;
       this.canvas.setPointerCapture && this.canvas.setPointerCapture(e.pointerId);
+
+      if (e.button === 0 && !e.shiftKey) {
+        const rotItem = this.hitRotateHandle3D(e);
+        if (rotItem) {
+          this.dragging = {
+            mode: 'furniture-rotate',
+            item: rotItem,
+            x: e.clientX,
+            y: e.clientY,
+            startX: e.clientX,
+            startY: e.clientY,
+            moved: false,
+            pushed: false,
+          };
+          this.canvas.style.cursor = 'grabbing';
+          e.preventDefault();
+          return;
+        }
+
+        const furnHit = this.hitFurniture3D(e);
+        if (furnHit && furnHit.item) {
+          const item = furnHit.item;
+          this.app.select({ type: 'furniture', id: item.id });
+          const planeY = item.elev || 0;
+          const floorPt = this.intersectFloorPlane(e, planeY) || { x: item.x, z: item.y };
+          this.dragging = {
+            mode: 'furniture-move',
+            item,
+            planeY,
+            startW: { x: floorPt.x, y: floorPt.z },
+            orig: { x: item.x, y: item.y, rot: item.rot || 0 },
+            x: e.clientX,
+            y: e.clientY,
+            startX: e.clientX,
+            startY: e.clientY,
+            moved: false,
+            pushed: false,
+          };
+          this.canvas.style.cursor = 'grabbing';
+          e.preventDefault();
+          return;
+        }
+      }
+
       this.dragging = {
         x: e.clientX,
         y: e.clientY,
+        startX: e.clientX,
+        startY: e.clientY,
+        button: e.button,
+        moved: false,
         mode: e.button === 0 && !e.shiftKey ? 'rotate' : 'pan',
       };
       this.canvas.style.cursor = 'grabbing';
@@ -852,11 +1105,87 @@
     }
 
     onMove(e) {
-      if (!this.active || !this.dragging) return;
+      if (!this.active) return;
+      if (!this.dragging) {
+        if (this.hitRotateHandle3D(e) || this.hitFurniture3D(e)) {
+          this.canvas.style.cursor = 'pointer';
+        } else {
+          this.canvas.style.cursor = 'grab';
+        }
+        return;
+      }
+
       const dx = e.clientX - this.dragging.x;
       const dy = e.clientY - this.dragging.y;
       this.dragging.x = e.clientX;
       this.dragging.y = e.clientY;
+      const totalDist = Math.hypot(
+        e.clientX - (this.dragging.startX ?? e.clientX),
+        e.clientY - (this.dragging.startY ?? e.clientY)
+      );
+      if (totalDist > 3) this.dragging.moved = true;
+
+      if (this.dragging.mode === 'furniture-move') {
+        if (!this.dragging.moved) return;
+        const item = this.dragging.item;
+        if (!item) return;
+        const floorPt = this.intersectFloorPlane(e, this.dragging.planeY || 0);
+        if (!floorPt) return;
+        if (!this.dragging.pushed) {
+          this.app.pushHistory();
+          this.dragging.pushed = true;
+        }
+        const wdx = floorPt.x - this.dragging.startW.x;
+        const wdy = floorPt.z - this.dragging.startW.y;
+        const candX = this.dragging.orig.x + wdx;
+        const candY = this.dragging.orig.y + wdy;
+        const plan = this.app.plan;
+
+        if (!e.altKey && FC.snapFurnitureToWalls) {
+          const wallSnap = FC.snapFurnitureToWalls(plan, item, candX, candY, 0.35);
+          if (wallSnap) {
+            item.x = wallSnap.x;
+            item.y = wallSnap.y;
+            item.rot = wallSnap.rot;
+          } else {
+            item.x = FC.round(candX, 3);
+            item.y = FC.round(candY, 3);
+          }
+        } else {
+          item.x = FC.round(candX, 3);
+          item.y = FC.round(candY, 3);
+        }
+        item.custom = true;
+        this.syncFurnitureTransform(item);
+        if (this.app.editor) this.app.editor.draw();
+        return;
+      }
+
+      if (this.dragging.mode === 'furniture-rotate') {
+        if (!this.dragging.moved) return;
+        const item = this.dragging.item;
+        if (!item) return;
+        const floorPt = this.intersectFloorPlane(e, item.elev || 0);
+        if (!floorPt) return;
+        if (!this.dragging.pushed) {
+          this.app.pushHistory();
+          this.dragging.pushed = true;
+        }
+        const angle = Math.atan2(floorPt.z - item.y, floorPt.x - item.x) - Math.PI / 2;
+        let snapAngle = angle;
+        if (!e.altKey) {
+          const step = e.shiftKey || (this.app.ui && this.app.ui.ortho) ? Math.PI / 4 : Math.PI / 12;
+          snapAngle = Math.round(angle / step) * step;
+        }
+        snapAngle = Math.atan2(Math.sin(snapAngle), Math.cos(snapAngle));
+        item.rot = FC.round(snapAngle, 3);
+        item.custom = true;
+        this.syncFurnitureTransform(item);
+        if (this.app.editor) this.app.editor.draw();
+        if (this.app.ui) this.app.ui.renderSidebar();
+        return;
+      }
+
       if (this.dragging.mode === 'rotate') {
         this.goal.yaw -= dx * 0.006;
         const invert = this.app.plan.settings.invertPitch ?? true;
@@ -871,8 +1200,58 @@
       }
     }
 
-    onUp() {
-      this.dragging = null;
+    onUp(e) {
+      if (this.dragging) {
+        const drag = this.dragging;
+        this.dragging = null;
+        if (drag.mode === 'furniture-move' || drag.mode === 'furniture-rotate') {
+          if (drag.moved && drag.item) {
+            const rooms = this.app.rooms || [];
+            for (let i = rooms.length - 1; i >= 0; i--) {
+              if (FC.pointInPolygon && FC.pointInPolygon({ x: drag.item.x, y: drag.item.y }, rooms[i].polygon)) {
+                drag.item.roomId = rooms[i].id;
+                break;
+              }
+            }
+            drag.item.custom = true;
+            if (this.app.plan) this.app.plan.furniture = this.app.furniture;
+            this.app.changed({ rooms: false, furniture: false, save: true });
+          }
+          this.canvas.style.cursor = 'pointer';
+          return;
+        }
+        if (drag.mode === 'rotate' && !drag.moved) {
+          if (this.app.ui && this.app.ui.selection) {
+            this.app.clearSelection();
+          }
+        } else if (drag.mode === 'pan' && drag.button === 2 && !drag.moved && e) {
+          const furnHit = this.hitFurniture3D(e);
+          if (furnHit && furnHit.item && this.app.ui && this.app.ui.openContextMenu) {
+            const f = furnHit.item;
+            this.app.select({ type: 'furniture', id: f.id });
+            this.app.ui.openContextMenu(e.clientX, e.clientY, [
+              {
+                label: 'Rotate 90°',
+                icon: 'refresh',
+                shortcut: 'R',
+                action: () => this.app.rotateSelectedFurniture(Math.PI / 2),
+              },
+              {
+                label: 'Duplicate ' + f.kind,
+                icon: 'copy',
+                shortcut: 'Ctrl+D',
+                action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
+              },
+              {
+                label: 'Delete ' + f.kind,
+                icon: 'trash',
+                danger: true,
+                action: () => this.app.deleteSelectedFurniture(),
+              },
+            ]);
+          }
+        }
+      }
       this.canvas.style.cursor = 'grab';
     }
 
@@ -933,8 +1312,13 @@
 
     screenshot() {
       if (!this.renderer) return null;
+      const gizmoWasVisible = this.selectionGizmo ? this.selectionGizmo.visible : false;
+      if (this.selectionGizmo) this.selectionGizmo.visible = false;
       this.renderer.render(this.scene, this.camera);
-      return this.canvas.toDataURL('image/png');
+      const data = this.canvas.toDataURL('image/png');
+      if (this.selectionGizmo) this.selectionGizmo.visible = gizmoWasVisible;
+      this.renderer.render(this.scene, this.camera);
+      return data;
     }
   }
 

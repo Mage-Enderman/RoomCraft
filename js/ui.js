@@ -94,14 +94,16 @@
         'pointerdown',
         (e) => {
           const el = e.target;
-          if (el.matches && el.matches('input[type="range"][data-setting], input[type="range"][data-sun], input[type="range"][data-density]')) {
+          if (el.matches && el.matches('input[type="range"][data-setting], input[type="range"][data-sun], input[type="range"][data-density], input[type="range"][data-furniture-rot]')) {
             const key = el.dataset.setting
               ? 'setting:' + el.dataset.setting
               : el.dataset.sun !== undefined
                 ? 'sun'
                 : el.dataset.density !== undefined
                   ? 'density'
-                  : '';
+                  : el.dataset.furnitureRot
+                    ? 'furnRot:' + el.dataset.furnitureRot
+                    : '';
             if (!this._activeSetting) {
               this.app.pushHistory();
               this._activeSetting = key || el.name || 'range';
@@ -296,7 +298,11 @@
       let html = '';
       const k = (txt) => `<kbd>${txt}</kbd>`;
       if (ui.view3d) {
-        html = `${k('Drag')} orbit &nbsp;·&nbsp; ${k('Right-drag')} pan &nbsp;·&nbsp; ${k('Scroll')} zoom`;
+        if (ui.selection && ui.selection.type === 'furniture') {
+          html = `${k('Drag')} move furniture &nbsp;·&nbsp; ${k('Drag handle')} or ${k('R')} rotate &nbsp;·&nbsp; ${k('Alt')} free move &nbsp;·&nbsp; ${k('Del')} delete`;
+        } else {
+          html = `${k('Click')} select furniture &nbsp;·&nbsp; ${k('Drag')} orbit &nbsp;·&nbsp; ${k('Right-drag')} pan &nbsp;·&nbsp; ${k('Scroll')} zoom`;
+        }
       } else if (this.app.editor && this.app.editor.lengthBuffer) {
         const ex = FC.isImperial && FC.isImperial(plan) ? `e.g. 12'6" or 14` : `e.g. 4.2`;
         html = `${k('Type')} a dimension (${ex}), then ${k('Enter')} to place it`;
@@ -641,14 +647,18 @@
           </div>
           <div class="sel-metrics two">
             <div><b>${fmtLenShort(f.w, 2)} × ${fmtLen(f.d)}</b><span>size</span></div>
-            <div><b>${rotDeg}°</b><span>rotation</span></div>
+            <div><b data-furniture-rot-value>${rotDeg}°</b><span>rotation</span></div>
+          </div>
+          <div class="field" style="margin-top:10px;">
+            <div class="field-head"><span>Rotation angle</span><span class="value" data-furniture-rot-value>${rotDeg}°</span></div>
+            <input type="range" data-furniture-rot="${f.id}" min="0" max="360" step="5" value="${rotDeg}">
           </div>
           <div class="btn-row two" style="margin-top:10px;">
             <button class="btn soft sm" data-action="rotate-furniture" data-furniture="${f.id}">${I('rotate3d')} Rotate 90°</button>
             <button class="btn soft sm" data-action="duplicate-selection">${I('copy')} Duplicate</button>
           </div>
           <button class="btn soft sm danger" style="width:100%;margin-top:6px;" data-action="delete-selection">${I('trash')} Delete</button>
-          <div class="sel-help" style="margin-top:8px;">Drag near a wall to magnetically snap flush against it (hold <kbd>Alt</kbd> for free placement). Press <kbd>R</kbd> to rotate.</div>
+          <div class="sel-help" style="margin-top:8px;">Drag in 2D or 3D to move (snaps flush against nearby walls; hold <kbd>Alt</kbd> for free placement). Drag the rotation handle or press <kbd>R</kbd> to rotate.</div>
         </div>`;
       }
       if (sel.type === 'light') {
@@ -1094,6 +1104,7 @@
       if (el.dataset.setting) return 'setting:' + el.dataset.setting;
       if (el.dataset.sun !== undefined) return 'sun';
       if (el.dataset.density !== undefined) return 'density';
+      if (el.dataset.furnitureRot) return 'furnRot:' + el.dataset.furnitureRot;
       if (el.dataset.opField) return 'op:' + el.dataset.opField;
       return 'value';
     }
@@ -1162,6 +1173,16 @@
       }
       if (el.dataset && el.dataset.roomName) {
         this.app.setRoomName(el.dataset.roomName, el.value);
+        return;
+      }
+      if (el.dataset && el.dataset.furnitureRot) {
+        this.ensureHistory(el);
+        const value = parseFloat(el.value);
+        if (isFinite(value)) {
+          this.app.setSelectedFurnitureRotation(value);
+          document.querySelectorAll('[data-furniture-rot-value]').forEach((n) => (n.textContent = Math.round(value) + '°'));
+          this.paintRanges(document);
+        }
         return;
       }
       if (el.dataset && el.dataset.lightIntensity) {
@@ -1375,9 +1396,11 @@
           app.flipDoorHinge(el.dataset.opening);
           this.renderSidebar();
           break;
-        case 'rotate-furniture':
-          app.rotateSelectedFurniture(Math.PI / 2);
+        case 'rotate-furniture': {
+          const deg = el.dataset.angle ? parseFloat(el.dataset.angle) : 90;
+          app.rotateSelectedFurniture((deg * Math.PI) / 180);
           break;
+        }
         case 'add-light':
           app.addLightAt(null, null, el.dataset.lightType || 'ceiling');
           break;

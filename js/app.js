@@ -533,6 +533,9 @@
     select(selection) {
       this.ui.selection = selection || null;
       if (this.editor) this.editor.draw();
+      if (this.viewer && this.viewer.updateSelectionGizmo) {
+        this.viewer.updateSelectionGizmo();
+      }
       if (this.ui) {
         this.ui.renderToolrail();
         this.ui.renderSidebar();
@@ -543,6 +546,9 @@
     clearSelection() {
       this.ui.selection = null;
       if (this.editor) this.editor.draw();
+      if (this.viewer && this.viewer.updateSelectionGizmo) {
+        this.viewer.updateSelectionGizmo();
+      }
       if (this.ui) {
         this.ui.renderToolrail();
         this.ui.renderSidebar();
@@ -1534,12 +1540,49 @@
       const f = this.furniture.find((item) => item.id === sel.id);
       if (!f) return;
       this.pushHistory();
-      f.rot = FC.round((f.rot || 0) + (delta || Math.PI / 2), 3);
+      const step = delta !== undefined && delta !== null ? delta : Math.PI / 2;
+      f.rot = FC.round((f.rot || 0) + step, 3);
       f.custom = true;
       this.plan.furniture = this.furniture;
+      if (this.viewer && this.viewer.syncFurnitureTransform) {
+        this.viewer.syncFurnitureTransform(f);
+      }
       this.changed({ rooms: false, furniture: false, save: true });
       if (this.viewer) this.viewer.markDirty();
       this.toast('Rotated ' + f.kind, 'info');
+    }
+
+    setSelectedFurnitureRotation(deg) {
+      const sel = this.ui.selection;
+      if (!sel || sel.type !== 'furniture' || !this.furniture) return;
+      const f = this.furniture.find((item) => item.id === sel.id);
+      if (!f) return;
+      const angleDeg = parseFloat(deg);
+      if (!isFinite(angleDeg)) return;
+      f.rot = FC.round((angleDeg * Math.PI) / 180, 3);
+      f.custom = true;
+      this.plan.furniture = this.furniture;
+      if (this.viewer && this.viewer.syncFurnitureTransform) {
+        this.viewer.syncFurnitureTransform(f);
+      }
+      if (this.editor) this.editor.draw();
+      this.saveSoon();
+    }
+
+    nudgeSelectedFurniture(dx, dy) {
+      const sel = this.ui.selection;
+      if (!sel || sel.type !== 'furniture' || !this.furniture) return;
+      const f = this.furniture.find((item) => item.id === sel.id);
+      if (!f) return;
+      this.pushHistory();
+      f.x = FC.round((f.x || 0) + dx, 3);
+      f.y = FC.round((f.y || 0) + dy, 3);
+      f.custom = true;
+      this.plan.furniture = this.furniture;
+      if (this.viewer && this.viewer.syncFurnitureTransform) {
+        this.viewer.syncFurnitureTransform(f);
+      }
+      this.changed({ rooms: false, furniture: false, save: true });
     }
 
     deleteSelectedFurniture() {
@@ -1817,7 +1860,9 @@
       this._viewerToken++;
       this.ui.view3d = true;
       this.ui.step = step;
-      this.ui.selection = null;
+      if (!this.ui.selection || this.ui.selection.type !== 'furniture') {
+        this.ui.selection = null;
+      }
       this.ui.hideWelcome();
       this.ui.setViewMode(true);
       this.ui.renderAll();
@@ -1836,11 +1881,12 @@
     exit3D(opts) {
       opts = opts || {};
       this._viewerToken++;
+      const keepSel = this.ui.selection && this.ui.selection.type === 'furniture' ? this.ui.selection : null;
       if (this.viewer && this.ui.view3d) {
         this.viewer.startTransition('out', () => {
           this.ui.view3d = false;
           this.ui.step = this._last2dStep || 5;
-          this.ui.selection = null;
+          this.ui.selection = keepSel;
           this.ui.setViewMode(false);
           if (this.ui) this.ui.renderAll();
           if (!opts.silent) this.toast('Back to the plan', 'info');
@@ -1854,7 +1900,7 @@
       } else {
         this.ui.view3d = false;
         this.ui.step = this._last2dStep || 5;
-        this.ui.selection = null;
+        this.ui.selection = keepSel;
         this.ui.setViewMode(false);
         if (this.ui) this.ui.renderAll();
       }
@@ -2503,6 +2549,33 @@
           return;
         }
 
+        if (
+          this.ui.selection &&
+          this.ui.selection.type === 'furniture' &&
+          (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')
+        ) {
+          e.preventDefault();
+          const step = e.shiftKey ? 0.25 : 0.05;
+          let lx = 0;
+          let ly = 0;
+          if (e.key === 'ArrowLeft') lx = -step;
+          else if (e.key === 'ArrowRight') lx = step;
+          else if (e.key === 'ArrowUp') ly = -step;
+          else if (e.key === 'ArrowDown') ly = step;
+
+          if (this.ui.view3d && this.viewer && this.viewer.orbit) {
+            const yaw = this.viewer.orbit.yaw || 0;
+            const right = { x: Math.cos(yaw), z: -Math.sin(yaw) };
+            const fwd = { x: -Math.sin(yaw), z: -Math.cos(yaw) };
+            const wx = right.x * lx - fwd.x * ly;
+            const wy = right.z * lx - fwd.z * ly;
+            this.nudgeSelectedFurniture(wx, wy);
+          } else {
+            this.nudgeSelectedFurniture(lx, ly);
+          }
+          return;
+        }
+
         if (this.editor && (this.editor.wallChain || (this.ui.drawingFresh && this.plan.outline.length))) {
           return;
         }
@@ -2536,8 +2609,8 @@
           e.preventDefault();
         } else if (key === 'r') {
           if (this.ui.selection && this.ui.selection.type === 'furniture') {
-            this.rotateSelectedFurniture();
-          } else {
+            this.rotateSelectedFurniture(e.shiftKey ? -Math.PI / 2 : Math.PI / 2);
+          } else if (!this.ui.view3d) {
             this.setTool('room');
           }
           e.preventDefault();
