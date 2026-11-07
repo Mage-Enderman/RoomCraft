@@ -2882,7 +2882,7 @@ body:not(.mode-3d) .viewer-badge {
   border: 1px solid rgba(30, 31, 36, 0.08);
   border-radius: 12px;
   background: #ffffff;
-  color: var(--text);
+  color: #1e1f24;
   font-family: var(--font);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -2914,7 +2914,7 @@ body:not(.mode-3d) .viewer-badge {
 .catalog-card-name {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text);
+  color: #1a1b20;
   line-height: 1.3;
 }
 
@@ -2923,14 +2923,14 @@ body:not(.mode-3d) .viewer-badge {
   margin-top: 2px;
   font-size: 10px;
   font-weight: 500;
-  color: var(--text-muted);
+  color: #63646d;
 }
 
 .catalog-card-desc {
   margin: 6px 0 0;
   font-size: 10px;
   line-height: 1.35;
-  color: #7b7c84;
+  color: #71727a;
 }
 
 /* Responsive                                                          */

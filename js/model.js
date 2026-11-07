@@ -2363,6 +2363,31 @@
     return matched;
   };
 
+  FC.findDoorZones = function (plan, wallSegments) {
+    const segs = wallSegments || FC.getSegments(plan);
+    const walkableOpenings = (plan.openings || []).filter((o) => o.kind === 'door' || o.kind === 'opening');
+    const doorZones = [];
+    walkableOpenings.forEach((d) => {
+      const pl = FC.openingPlacement(plan, d, segs);
+      if (pl) {
+        let r = 0.8;
+        if (d.kind === 'opening') {
+          r = Math.max(0.75, (pl.width || 0.9) * 0.7);
+        } else if (d.style === 'sliding' || d.style === 'bifold') {
+          r = 0.65;
+        } else {
+          r = Math.min(0.85, Math.max(0.65, (pl.width || 0.8) * 0.85));
+        }
+        doorZones.push({ x: pl.x, y: pl.y, radius: r, door: d });
+      }
+    });
+    return doorZones;
+  };
+
+  FC.collectAllWalls = function (plan) {
+    return FC.getSegments(plan);
+  };
+
   FC.bedBlocksWindow = function (bed, roomWindows) {
     if (!roomWindows || !roomWindows.length) return false;
     const hDist = bed.d / 2;
@@ -2450,22 +2475,7 @@
     const globalVar = parseInt(plan.layoutVariation, 10) || 0;
 
     const wallSegments = FC.getSegments(plan);
-    const walkableOpenings = (plan.openings || []).filter((o) => o.kind === 'door' || o.kind === 'opening');
-    const doorZones = [];
-    walkableOpenings.forEach((d) => {
-      const pl = FC.openingPlacement(plan, d, wallSegments);
-      if (pl) {
-        let r = 0.8;
-        if (d.kind === 'opening') {
-          r = Math.max(0.75, (pl.width || 0.9) * 0.7);
-        } else if (d.style === 'sliding' || d.style === 'bifold') {
-          r = 0.65;
-        } else {
-          r = Math.min(0.85, Math.max(0.65, (pl.width || 0.8) * 0.85));
-        }
-        doorZones.push({ x: pl.x, y: pl.y, radius: r, door: d });
-      }
-    });
+    const doorZones = FC.findDoorZones(plan, wallSegments);
 
     function add(room, kind, x, y, w, d, rot, opts) {
       opts = opts || {};

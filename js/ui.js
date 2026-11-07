@@ -1600,7 +1600,11 @@
             overlay.querySelectorAll('.catalog-card').forEach((card) => {
               card.addEventListener('click', () => {
                 const kind = card.dataset.catalogKind;
-                this.app.addFurnitureItem(kind, null, null, room ? room.id : null);
+                try {
+                  this.app.addFurnitureItem(kind, null, null, room ? room.id : null);
+                } catch (err) {
+                  console.error('Error adding furniture item:', err);
+                }
                 close(kind);
               });
             });

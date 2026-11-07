@@ -1335,60 +1335,86 @@
     }
 
     addFurnitureItem(kind, customX = null, customY = null, targetRoomId = null) {
-      if (!this.rooms.length) {
-        this.toast('Create enclosed rooms first', 'info');
-        return;
-      }
       this.pushHistory();
+      const def = (FC.furnitureCatalog && FC.furnitureCatalog[kind]) || {};
+
       let r = null;
-      if (targetRoomId) {
+      if (targetRoomId && this.rooms) {
         r = this.rooms.find((rm) => rm.id === targetRoomId);
       }
-      if (!r && this.ui && this.ui.selection && this.ui.selection.type === 'room') {
+      if (!r && this.ui && this.ui.selection && this.ui.selection.type === 'room' && this.rooms) {
         r = this.rooms.find((rm) => rm.id === this.ui.selection.id);
       }
-      if (!r) {
+      if (!r && def.category && this.rooms && this.rooms.length) {
+        r = this.rooms.find((rm) => rm.type === def.category);
+      }
+      if (!r && this.rooms && this.rooms.length) {
         r = this.rooms[0];
       }
 
-      const b = r.bounds || (r.polygon && r.polygon.length ? FC.polygonBounds(r.polygon) : { cx: 0, cy: 0, w: 2, d: 2 });
-      const def = FC.furnitureCatalog[kind] || {};
       const w = def.w || (kind === 'bed' ? 1.6 : kind === 'sofa' ? 2.1 : 1.0);
       const d = def.d || (kind === 'bed' ? 2.0 : kind === 'sofa' ? 0.9 : 0.8);
-      const h = def.h || FC.FURNITURE_HEIGHTS[kind] || 0.75;
+      const h = def.h || (FC.FURNITURE_HEIGHTS && FC.FURNITURE_HEIGHTS[kind]) || 0.75;
       const elev = def.elev || 0;
       const mat = def.mat || 'wood';
       const decor = !!def.decor;
 
-      let posX = customX != null ? customX : FC.round(b.cx, 3);
-      let posY = customY != null ? customY : FC.round(b.cy, 3);
+      let posX = customX != null ? customX : 0;
+      let posY = customY != null ? customY : 0;
       let rot = 0;
 
-      if (customX == null && customY == null && r.polygon && r.polygon.length >= 3) {
-        const segs = FC.collectAllWalls(this.plan);
-        const doorZones = FC.findDoorZones(this.plan);
-        const roomWins = FC.findRoomWindows(r, this.plan, segs);
-        const rule = FC.ITEM_RULES[kind] || { archetype: 'wall-perimeter' };
-        if (rule.archetype === 'corner' || rule.archetype === 'corner-or-wall') {
-          const cp = FC.findCornerPlacement(r, kind, w, d, this.furniture || [], doorZones, roomWins, segs);
-          if (cp) {
-            posX = cp.x;
-            posY = cp.y;
-            rot = cp.rot;
+      if (r) {
+        const b = r.bounds || (r.polygon && r.polygon.length ? FC.polygonBounds(r.polygon) : { cx: 0, cy: 0, w: 2, d: 2 });
+        if (customX == null) posX = FC.round(b.cx, 3);
+        if (customY == null) posY = FC.round(b.cy, 3);
+
+        if (customX == null && customY == null && r.polygon && r.polygon.length >= 3) {
+          const segs = FC.getSegments(this.plan);
+          const doorZones = FC.findDoorZones(this.plan, segs);
+          const roomWins = FC.findRoomWindows(r, this.plan, segs);
+          const rule = (FC.ITEM_RULES && FC.ITEM_RULES[kind]) || { archetype: 'wall-perimeter' };
+          if (rule.archetype === 'corner' || rule.archetype === 'corner-or-wall') {
+            const cp = FC.findCornerPlacement(r, kind, w, d, this.furniture || [], doorZones, roomWins, segs);
+            if (cp) {
+              posX = cp.x;
+              posY = cp.y;
+              rot = cp.rot;
+            }
+          } else if (rule.archetype === 'wall-perimeter' || rule.archetype === 'head-to-wall') {
+            const wp = FC.findWallPlacement(this.plan, r, segs, kind, w, d, this.furniture || [], doorZones, null, roomWins);
+            if (wp) {
+              posX = wp.x;
+              posY = wp.y;
+              rot = wp.rot;
+            }
           }
-        } else if (rule.archetype === 'wall-perimeter' || rule.archetype === 'head-to-wall') {
-          const wp = FC.findWallPlacement(this.plan, r, segs, kind, w, d, this.furniture || [], doorZones, null, roomWins);
-          if (wp) {
-            posX = wp.x;
-            posY = wp.y;
-            rot = wp.rot;
+        }
+      } else {
+        if (customX == null || customY == null) {
+          let center = null;
+          if (this.plan) {
+            const pb = FC.planBounds(this.plan);
+            if (pb && isFinite(pb.cx) && isFinite(pb.cy) && (pb.w > 0.1 || pb.d > 0.1)) {
+              center = { x: pb.cx, y: pb.cy };
+            }
           }
+          if (!center && this.editor && typeof this.editor.s2w === 'function' && this.editor.view && this.editor.view.scale) {
+            const pt = this.editor.s2w(this.editor.W / 2, this.editor.H / 2);
+            if (isFinite(pt.x) && isFinite(pt.y)) {
+              center = pt;
+            }
+          }
+          if (!center || !isFinite(center.x) || !isFinite(center.y)) {
+            center = { x: 5, y: 5 };
+          }
+          if (customX == null) posX = FC.round(center.x, 3);
+          if (customY == null) posY = FC.round(center.y, 3);
         }
       }
 
       const item = {
         id: FC.uid('f'),
-        roomId: r.id,
+        roomId: r ? r.id : null,
         kind,
         x: posX,
         y: posY,

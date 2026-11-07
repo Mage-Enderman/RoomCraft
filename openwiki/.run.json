@@ -1,0 +1,443 @@
+{
+  "schemaVersion": 1,
+  "runId": "705e1317-65d0-459c-804d-02135a495244",
+  "mode": "init",
+  "phase": "generating",
+  "startedAt": "2026-11-07T13:06:40.330Z",
+  "language": "en",
+  "languageChanged": false,
+  "requiredRewritePages": [],
+  "initialPages": [],
+  "sourceFingerprint": "sha256:753386f0d66453620448fce7c6b0269bc550add94ce6c9d5794ff925651d25f9",
+  "targetGitHead": "bf3625f1fd636cb2513a505f972c94632dc7de55",
+  "actor": {
+    "producerActor": "openwiki/0.9.0",
+    "metadataModel": "gyro-gyro-s"
+  },
+  "previousLastUpdate": null,
+  "wikiGoal": "A code wiki for this repository.",
+  "beforeContentSnapshot": "632cf2073a36a4ef01dcd33b2a7a2d55b75afc69f961e55e70fa14a5e236f881",
+  "preparedWiki": {
+    "generatedProvenance": []
+  },
+  "plan": {
+    "pages": [
+      {
+        "id": "01270594-8047-43d0-a110-8ccb19965eec",
+        "path": "/openwiki/architecture/app-controller.md",
+        "title": "App controller — plan state, changed() fan-out, history, and persistence",
+        "purpose": "The App class in js/app.js as the ownership boundary: plan/project selection, _syncPlan and _roomMeta, recomputeRooms/recomputeFurniture, the changed(opts) render-and-save fan-out, snapshot undo/redo, debounced localStorage persistence, and step/tool routing.",
+        "seedPaths": [
+          "js/app.js",
+          "js/editor.js",
+          "js/ui.js",
+          "js/viewer3d.js"
+        ],
+        "relatedPages": [
+          "/openwiki/architecture/ui-shell.md",
+          "/openwiki/concepts/plan-model.md",
+          "/openwiki/workflows/editing-session.md",
+          "/openwiki/workflows/export-and-persistence.md"
+        ],
+        "instructions": [
+          "Document _activatePlan resetting editor transient state (wallChain, chainFirst, lengthBuffer, snap, drag), clearing history, and bumping _viewerToken before deactivating the viewer.",
+          "Document persistence keys and failure handling: roomcraft.projects.v1 / roomcraft.current.v1 with legacy floorcraft.* fallback, saveSoon 450ms debounce, saveNow on beforeunload, storage failure sets saveStatus dirty plus a one-time toast.",
+          "Document the history model: _snapshot JSON with updatedAt removed and furniture cloned, MAX_HISTORY 70, pushHistory no-op on identical snapshot, _restore re-normalizes and re-derives rooms/furniture, and the wall-chain special case in canUndo/undo.",
+          "Trace changed(opts) precisely: opts.rooms triggers recomputeRooms (which first calls FC.ensureOpeningHosts), opts.furniture triggers recomputeFurniture, then editor.draw(), viewer.markDirty(), and either a full UI re-render + saveSoon() or the light updateStats/updateHint path when save is false.",
+          "Use a Mermaid flowchart or sequenceDiagram for the pointer edit -> pushHistory -> changed() -> recompute -> render -> saveSoon chain."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "b34c1ed1-2b6d-4f65-9e7c-e2dfd2636b31",
+        "path": "/openwiki/architecture/overview.md",
+        "title": "Architecture overview — FC module bus, load order, and boot",
+        "purpose": "System map of the whole application: the shared window.FC namespace, script load order in index.html, the boot() handshake that waits for Editor2D/UI/Viewer3D, FC.app as the single controller instance, and a source map of the js/ files plus vendored three/GLTFExporter/libredwg.",
+        "seedPaths": [
+          "index.html",
+          "js/app.js",
+          "js/cad-io.js",
+          "js/editor.js",
+          "js/furniture3d.js",
+          "js/icons.js",
+          "js/model.js",
+          "js/ui.js",
+          "js/viewer3d.js",
+          "styles.css"
+        ],
+        "relatedPages": [
+          "/openwiki/architecture/app-controller.md",
+          "/openwiki/architecture/ui-shell.md",
+          "/openwiki/concepts/plan-model.md",
+          "/openwiki/integrations/vendor-runtime.md"
+        ],
+        "instructions": [
+          "Cover why viewer3d.js and furniture3d.js bail out when window.THREE is missing, and why cad-io.js DWG transcode is lazy (single cached _dwgInstancePromise).",
+          "Document the dependency direction: model.js defines FC geometry/plan/furniture primitives with no DOM assumptions; editor.js, ui.js, viewer3d.js, furniture3d.js and cad-io.js attach to FC; app.js owns the App class and is loaded last.",
+          "Explain boot(): app.js polls window.FC for Editor2D/UI/Viewer3D via setTimeout, exposes window.roomcraft and window.floorcraft, and degrades to a statusHint message if construction throws.",
+          "Include a Mermaid flowchart of module attach + boot order; describe the repo layout table (js/, vendor/, scratch/, references/, .github/workflows/openwiki-update.yml) and note references/ is gitignored."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "af969816-838d-4e6f-984d-75b8bbfff907",
+        "path": "/openwiki/architecture/ui-shell.md",
+        "title": "UI shell — DOM chrome, data-action dispatch, sidebar steps, modals",
+        "purpose": "How index.html markup and the UI class in js/ui.js drive the app: the 7-step stepper, toolrail tool list, sidebar HTML per step, delegated click/input/change listeners, data-action routing into App methods, range history batching, menus/modals/toasts, and CSS mode classes.",
+        "seedPaths": [
+          "index.html",
+          "js/icons.js",
+          "js/ui.js",
+          "styles.css"
+        ],
+        "relatedPages": [
+          "/openwiki/architecture/app-controller.md",
+          "/openwiki/operations/configuration-and-view-state.md",
+          "/openwiki/workflows/editing-session.md"
+        ],
+        "instructions": [
+          "Document delegated event handling: click -> closest('[data-action]') -> handleAction switch into app methods; capture-phase pointerdown on range inputs sets _activeSetting so a slider drag pushes one history entry; document.has-overlay gates keyboard shortcuts while modals are open.",
+          "Document setViewMode/renderAll/updateSaveChip/updateStats/syncSidebar and the body classes they toggle (mode-3d, sidebar-closed, has-overlay, ready) that styles.css keys off.",
+          "Document the STEPS and TOOLS tables in js/ui.js as the source of the workflow steps (Outline, Walls, Rooms, Doors, Generate, Lighting, 3D) and toolrail actions including keyboard hints.",
+          "Note FC.hydrateIcons fills [data-icon] placeholders from the inline stroke icon set; modal results are Promises consumed by app.openCADImportModal and app.openScaleModal."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "6a7a009f-8f76-42cc-ad24-66f88e5701ea",
+        "path": "/openwiki/concepts/editor-2d.md",
+        "title": "2D editor — view transform, snapping, tools, and drag interactions",
+        "purpose": "Editor2D in js/editor.js: world/screen coordinate conversion, DPR sizing and fit, grid step selection, the snapPoint priority ladder, per-tool pointer handling (outline, wall chain/divider, door/window/opening, room chain, select, pan, light), drag types, typed length input, junction/wall/vertex manipulation, context menu actions, and the draw pipeline.",
+        "seedPaths": [
+          "js/app.js",
+          "js/editor.js",
+          "js/model.js"
+        ],
+        "relatedPages": [
+          "/openwiki/concepts/viewer-3d.md",
+          "/openwiki/concepts/wall-geometry.md",
+          "/openwiki/workflows/editing-session.md"
+        ],
+        "instructions": [
+          "Document outline/wall chain lifecycle: drawingFresh, commitPoint, addWall dedupe and minimum 0.15 m, finishOutline validity via FC.isSimplePolygon, endWallChain, cancelOutline, and typed lengthBuffer with Enter/Escape/Backspace handling.",
+          "Document screenTol(px) as the single tolerance source and gridStep() choosing the smallest grid step at least 15px wide.",
+          "Document snapPoint precedence: Alt bypasses all snapping, outline/chain close point, existing vertices, FC.getOpeningSnapPoints, nearest wall, ortho angle snapping (90 deg within ~0.17 rad, 45 deg within ~0.10 rad, Shift ortho 15 deg grid), then grid rounding at 0.1 m, else free.",
+          "Document the draw() layer order (grid, rooms, detected preview, furniture, labels, walls, openings, lights, outline handles, dims, draft, hover, snap, length input) and that the editor reuses app.rooms/app.detectedRoomsPreview. Use a sequenceDiagram for pointerdown -> snapPoint -> commit/addWall -> app.changed -> draw.",
+          "Enumerate drag types and their commit behaviour in moveDrag/onPointerUp: pan, vertex, wall-end, wall-extend (ray projection with door/wall snapping), wall, junction (FC.moveJunction), opening offset, furniture (sets roomId by hitRoom and f.custom), furniture-rotate, light."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "08674e7b-afeb-45da-9144-f6e0b45245c0",
+        "path": "/openwiki/concepts/furniture-layout.md",
+        "title": "Furniture generation — catalog, placement rules, and collision engine",
+        "purpose": "How interiors are generated: FC.furnitureCatalog entries and FC.FURNITURE_HEIGHTS, FC.ITEM_RULES archetypes, doorZones and circulation checks, FC.canPlaceFurniture rejection tests, wall/corner placement helpers, and the per-room-type recipes in FC.furnishPlan.",
+        "seedPaths": [
+          "js/app.js",
+          "js/furniture3d.js",
+          "js/model.js",
+          "scratch/test_furniture_move.js"
+        ],
+        "relatedPages": [
+          "/openwiki/concepts/room-detection.md",
+          "/openwiki/concepts/viewer-3d.md",
+          "/openwiki/operations/configuration-and-view-state.md"
+        ],
+        "instructions": [
+          "Document FC.canPlaceFurniture rejection order: room polygon containment, overlap with smaller other-room polygons, door swing zones, multi-door circulation line, wall segment intersection, and pairwise item overlap; FC.furnishPlan retries with small positional nudges and skips decor below density 0.7.",
+          "Document custom furniture: dragged items set f.custom and app.furniture is mirrored into plan.furniture so generation does not overwrite manual placement. Use a Mermaid flowchart for the placement attempt sequence.",
+          "Document doorZones radius derivation by door style (single/sliding/bifold/opening) and FC.findPrimaryZone as the usable bounds inset by 0.16 padding.",
+          "Document the 3D mapping: FC.buildFurniture3D(item, palette, wallHeight) builds low-poly groups with cached materials, item.elev for wall-mounted items, and FC.clearFurnitureMaterialCache for palette swaps.",
+          "Document variation determinism: plan.layoutVariation plus room index modulo 3 selects recipe variants, and generateInterior increments layoutVariation while re-running furnishPlan(force)."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "474007e3-a997-4140-a200-e15c99f355de",
+        "path": "/openwiki/concepts/plan-model.md",
+        "title": "Plan model — schema, normalization, and versioning",
+        "purpose": "The Plan object shape produced by FC.createPlan and coerced by FC.normalizePlan: outline, walls, openings, rooms/manualRooms/ignoredRooms, lights, furniture, settings, style, density, layoutVariation, furnished, autoDetectRooms, view state; plus FC.scalePlan and the room-meta serialization boundary.",
+        "seedPaths": [
+          "js/app.js",
+          "js/cad-io.js",
+          "js/model.js"
+        ],
+        "relatedPages": [
+          "/openwiki/concepts/furniture-layout.md",
+          "/openwiki/concepts/room-detection.md",
+          "/openwiki/concepts/wall-geometry.md",
+          "/openwiki/workflows/export-and-persistence.md"
+        ],
+        "instructions": [
+          "Document normalizePlan defaults and coercions: settings merged over FC.defaultSettings, view defaults, id regeneration, kind/style normalization, numeric defaults, wallHeight clamp 1.8..5, density clamp 0.4..1.6, and dropping walls without a/b or openings without hostKey.",
+          "Document the two room lists: derived plan.rooms metadata (_roomMeta) versus plan.manualRooms, and FC.scalePlan scaling outline/walls/openings/lights/furniture/furnitureOverrides/rooms/manualRooms with area scaled by factor squared.",
+          "State the invariant that coordinates are metres and y-down in 2D while CAD y is inverted on import.",
+          "Use an erDiagram for the Plan entities and relationships (outline vertices, walls referenced by openings through hostKey, rooms from polygons, furniture bound to roomId, lights, settings)."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "9d3b3dc0-0451-4748-bd7c-b05ba14b35cd",
+        "path": "/openwiki/concepts/room-detection.md",
+        "title": "Room detection — planar face walk, manual rooms, and auto typing",
+        "purpose": "FC.detectRooms behaviour: gap closing, half-edge graph construction, counter-clockwise face walking, area/centroid filtering against the outline, duplicate face deduplication, manualRooms merge, ignoredRooms filtering, and heuristic room-type/name assignment.",
+        "seedPaths": [
+          "js/app.js",
+          "js/model.js",
+          "scratch/test_room_manual_mode.js"
+        ],
+        "relatedPages": [
+          "/openwiki/concepts/furniture-layout.md",
+          "/openwiki/concepts/plan-model.md",
+          "/openwiki/workflows/editing-session.md"
+        ],
+        "instructions": [
+          "Document assignRoomMeta + matchPreviousRoom continuity (centroid distance < 3.2, area ratio < 0.8) and the heuristic ladder (hallway, bathroom, living, bedrooms by area, office, kitchen, closet, storage) plus numbering for duplicate types. Use a Mermaid flowchart for detectRooms -> preview -> adopt/apply.",
+          "Document deduplication by area+centroid proximity (<0.1 area difference and <0.25 centroid distance) and stable room ids 'room_<i>_<x>_<y>'.",
+          "Document the autoDetectRooms state machine in App: rename/type-change/delete/manual room creation disables auto-detection; preview (detectedRoomsPreview), adoptDetectedRoom, applyDetectedRooms, toggleAutoDetectRooms; ignoredRooms suppresses a detected room.",
+          "Document the graph walk invariant: face traversal picks the previous edge in angular order (idx - 1), cycle length >= 3, area > 0.4, centroid inside the outline, with steps 10000 and global guard 50000 caps."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "48b31645-0d0c-4259-8bef-402702ec5ca8",
+        "path": "/openwiki/concepts/viewer-3d.md",
+        "title": "3D viewer — scene build, wall extrusion, lighting, and transitions",
+        "purpose": "Viewer3D in js/viewer3d.js: WebGLRenderer setup, scene groups (structure, furnitureGroup, userLightsGroup), slab/floor/wall extrusion with opening holes, opening details, ceiling and xray, procedural lighting driven by plan.view.sunTime, orbit camera with pitch inversion, and the 2D/3D transition animation.",
+        "seedPaths": [
+          "js/app.js",
+          "js/furniture3d.js",
+          "js/model.js",
+          "js/viewer3d.js",
+          "vendor/three.min.js"
+        ],
+        "relatedPages": [
+          "/openwiki/concepts/furniture-layout.md",
+          "/openwiki/integrations/vendor-runtime.md",
+          "/openwiki/workflows/editing-session.md"
+        ],
+        "instructions": [
+          "Document build() order: buildGround/buildSlab/buildFloors/buildWalls/buildFurniture/buildCeiling/buildLights, then applyXray and updateLighting, with needsBuild/markDirty as the invalidation contract.",
+          "Document disposeObject and initThree being created on first activate; note renderer preserveDrawingBuffer enables screenshot(). Use a stateDiagram-v2 for inactive -> activating -> active -> transitioning-out.",
+          "Document lighting: directional sun with shadow frustum sized from FC.planBounds, hemisphere/ambient fill, per-room point lights from plan.lights, day factor from Math.sin(((sunTime - 6) / 13.5) * PI) and night handling.",
+          "Document the animate loop: goal/orbit easing, transitionDir in/out scaling structure and furnitureGroup y-scale, autoRotate, pitch clamp 0.08..1.52 and settings.invertPitch.",
+          "Document the wall extrusion invariant: each segment becomes an ExtrudeGeometry of length x wallHeight with holes punched from FC.openingPlacement (window sill/height clamped against wall height), virtual walls skipped, boundary segments using wallOutside material."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "913b3633-2ef1-44b2-835a-95ba48fd1a12",
+        "path": "/openwiki/concepts/wall-geometry.md",
+        "title": "Wall geometry — segments, junctions, healing, merging, and openings",
+        "purpose": "FC geometry operations that keep the plan coherent: FC.getSegments derived from outline + walls, junction discovery and sliding, resize/split/extend, connectTwoWalls corner/T/L resolution, parallel and collinear merging, healWallJunctions/closeWallGaps, and opening placement/host validation.",
+        "seedPaths": [
+          "js/app.js",
+          "js/editor.js",
+          "js/model.js",
+          "scratch/test_e2e_connect_walls.js",
+          "scratch/test_manual_connect_walls.js",
+          "scratch/test_wall_extend_snap_merge.js"
+        ],
+        "relatedPages": [
+          "/openwiki/concepts/editor-2d.md",
+          "/openwiki/concepts/room-detection.md",
+          "/openwiki/workflows/cad-interchange.md"
+        ],
+        "instructions": [
+          "Document FC.connectTwoWalls outcome types (corner via intersection, T via splitWall, parallel/projection fallback) and that openings migrate on split/merge/resize so doors keep their world position.",
+          "Document FC.ensureOpeningHosts: reparenting openings to a nearby wall, clamping offsets, dropping duplicates, and separating overlapping openings on the same host. Use a Mermaid flowchart for the connect/merge decision branches.",
+          "Document FC.healWallJunctions steps (orientation classification H/V/D, alignment to outline, gap closing with extThickness/intThickness tolerances) and FC.consolidateAllDoubleWalls + FC.mergeParallelWalls updating settings.intThickness.",
+          "Document junction semantics: FC.findJunctions grouping wall ends and outline vertices within tolerance, FC.moveJunction sliding all refs, and editor drag-junction welding when another junction is within screen tolerance.",
+          "Document the segment key convention 'o:<index>' for outline edges and 'w:<wallId>' for interior walls, and that openings reference segments by hostKey plus offset from a."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "dc4e0ce5-167e-4420-b399-d4d126211021",
+        "path": "/openwiki/integrations/vendor-runtime.md",
+        "title": "Integrations — vendored Three.js, GLTFExporter, and LibreDwg WASM",
+        "purpose": "Third-party runtime contracts the app depends on: global window.THREE from vendor/three.min.js, THREE.GLTFExporter from vendor/GLTFExporter.js, the LibreDwg ESM/WASM module for DWG transcoding, and the browser constraints around module loading.",
+        "seedPaths": [
+          "js/cad-io.js",
+          "js/furniture3d.js",
+          "js/viewer3d.js",
+          "vendor/GLTFExporter.js",
+          "vendor/libredwg/libredwg-web.js",
+          "vendor/libredwg/libredwg-web.wasm",
+          "vendor/three.min.js"
+        ],
+        "relatedPages": [
+          "/openwiki/architecture/overview.md",
+          "/openwiki/concepts/viewer-3d.md",
+          "/openwiki/workflows/cad-interchange.md"
+        ],
+        "instructions": [
+          "Document LibreDwg usage: dynamic import of vendor/libredwg/libredwg-web.js resolved against the page base href, wasmDir default vendor/libredwg, single cached instance, dwg_write_dxf returning bytes decoded as UTF-8 DXF.",
+          "Document that vendored scripts are global builds loaded before js/ scripts in index.html; app.js boot waits for FC constructors but does not check THREE, so 3D capability is detected by early-return guards in viewer3d.js/furniture3d.js.",
+          "Document the file:// constraint: WASM cannot load over file protocol, so DWG import requires serving over HTTP; document this as an operational prerequisite.",
+          "Document the renderer configuration Viewer3D depends on: antialias, alpha, preserveDrawingBuffer, shadow map settings, sRGB encoding, ACES tone mapping, and pixel ratio capped at 2.",
+          "Note GLTFExporter warnings/limits the export path can hit (non-BufferGeometry, unsupported lights) rather than assuming lossless export."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "5523aca4-92bd-4f16-9041-8d8feb1ce2fa",
+        "path": "/openwiki/operations/configuration-and-view-state.md",
+        "title": "Configuration — plan settings, styles, view toggles, and clamping",
+        "purpose": "The configurable surface that changes geometry and rendering: FC.defaultSettings fields, App.updateSetting ranges and cross-field clamping, style palettes and customStyle handling, density/layoutVariation, plan.view state (sunTime, ceiling, xray, autoRotate), and snap flags.",
+        "seedPaths": [
+          "js/app.js",
+          "js/editor.js",
+          "js/model.js",
+          "js/ui.js",
+          "js/viewer3d.js"
+        ],
+        "relatedPages": [
+          "/openwiki/architecture/ui-shell.md",
+          "/openwiki/concepts/plan-model.md",
+          "/openwiki/concepts/viewer-3d.md"
+        ],
+        "instructions": [
+          "Document App.updateSetting range table (wallHeight 2.2..4.2, extThickness/intThickness/slabThickness/doorHeight/doorWidth/windowSill/windowHeight/windowWidth) and the coupled rules: doorHeight capped by wallHeight - 0.05, windowHeight capped by wallHeight - windowSill - 0.05, and wallHeight changes re-clamping all openings and doorHeight.",
+          "Document plan.view flags (xray, ceiling, autoRotate, sunTime) and toggleView/updateLighting/markDirty interactions; note settings keys not in the ranges table (invertPitch) pass through normalizePlan untouched.",
+          "Document settings consumed by geometry vs rendering: extThickness/intThickness used by FC.getSegments and FC.healWallJunctions, wallHeight used by wall extrusion and opening clamps, snapGrid/snapAngle/showDims consumed by the editor, invertPitch consumed by the viewer.",
+          "Document style resolution in viewer3d.build(): plan.style === 'custom' with plan.customStyle wins over FC.styles lookup with scandinavian fallback; FC.styleOrder drives the palette UI; FC.clearFurnitureMaterialCache matters after palette changes.",
+          "Document that FC.normalizePlan additionally clamps wallHeight 1.8..5 and density 0.4..1.6, so restored plans can differ from the slider ranges."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "b5c9ba26-9679-41fc-aff0-f5e9bbd0438d",
+        "path": "/openwiki/testing/validation.md",
+        "title": "Testing and validation — scratch Node harnesses with mocked browser globals",
+        "purpose": "How behaviour is verified in this repo without a test runner: the scratch/*.js Node scripts that stub window/document/localStorage/THREE/requestAnimationFrame, load js/ files via require or eval, and assert geometry, room-mode, furniture persistence and wall-connection invariants.",
+        "seedPaths": [
+          "js/app.js",
+          "js/model.js",
+          "scratch/test_e2e_connect_walls.js",
+          "scratch/test_furniture_move.js",
+          "scratch/test_manual_connect_walls.js",
+          "scratch/test_room_manual_mode.js",
+          "scratch/test_wall_extend_snap_merge.js"
+        ],
+        "relatedPages": [
+          "/openwiki/architecture/app-controller.md",
+          "/openwiki/concepts/furniture-layout.md",
+          "/openwiki/concepts/room-detection.md",
+          "/openwiki/concepts/wall-geometry.md"
+        ],
+        "instructions": [
+          "Document that the eval-based tests use cwd-relative paths, so they must be run from the repository root (for example node scratch/test_furniture_move.js); there is no package.json, test runner, or CI job covering them.",
+          "Document the mock gaps that hide real behaviour: canvas getContext Proxy no-ops rendering, THREE Proxy returns empty objects, getElementById returns stub elements, so 3D scene construction and DOM rendering are not actually exercised. Recommend the narrowest harness matching the changed code path.",
+          "Document the two loading styles: require('../js/model.js') with global.window = global for pure geometry tests, and eval(fs.readFileSync('js/...')) of the full script set with mocked document/localStorage/THREE Proxy/requestAnimationFrame for App-level tests.",
+          "List the invariants each harness asserts: resizeWall anchor behaviour and opening offsets, connectTwoWalls corner/T types with door migration and junction refs count, junction sliding via FC.moveJunction, manual room mode protecting renamed rooms, scalePlan room scaling and area by factor squared, furniture drag not snapping back plus undo/redo of rotation and persistence of custom placement."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "2c0b3ad1-75c5-491d-8309-5da0325913f8",
+        "path": "/openwiki/workflows/cad-interchange.md",
+        "title": "Workflow — DXF/DWG export and import through the CAD bridge",
+        "purpose": "The AutoCAD interchange path in js/cad-io.js wired by App: DXF generation with fixed layers and double-line wall drafting, DWG magic-byte detection and LibreDwg WASM transcode, DXF analysis (unit inference, layer roles, outlier filtering), the interactive import modal, and importDXF consolidation into a Plan.",
+        "seedPaths": [
+          "js/app.js",
+          "js/cad-io.js",
+          "js/model.js",
+          "vendor/libredwg/libredwg-web.js"
+        ],
+        "relatedPages": [
+          "/openwiki/concepts/wall-geometry.md",
+          "/openwiki/integrations/vendor-runtime.md",
+          "/openwiki/workflows/export-and-persistence.md"
+        ],
+        "instructions": [
+          "Document App.importDWG failure handling: file:// WASM restriction error, transcode failure wrapped into a DXF suggestion, and the modal's unit/merge/importDoors/filterOutliers options passed into importDXF options. Use a sequenceDiagram for file -> isDWGBinary -> convertDWGtoDXF -> analyzeDXF -> modal -> importDXF -> _activatePlan.",
+          "Document CAD.analyzeDXF unit inference thresholds (maxDim > 1500 -> mm, < 45 -> m, else inches) and layer role naming by regex.",
+          "Document exportDXF: AC1018 header, $INSUNITS 6 metres, the fixed layer set (WALL_EXTERIOR, WALL_INTERIOR, DOORS, WINDOWS, ROOMS, FURNITURE, DIMENSIONS, LIGHTS), Y negation on write, and room/furniture TEXT entities.",
+          "Document importDXF stages in order: entity parsing (LINE/LWPOLYLINE/INSERT with Y inversion), IQR outlier filtering, outline selection from largest closed polyline plus concentric inner shell thickness inference, bounding-box outline fallback, outline-duplicate segment removal, double-line wall consolidation, door/window layer handling, FC.healWallJunctions, origin recentering by +1.0, FC.ensureOpeningHosts, FC.detectRooms."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "2ce8155b-0638-4573-923a-f1cbd10e4dfe",
+        "path": "/openwiki/workflows/editing-session.md",
+        "title": "Workflow — a full editing session from outline to 3D",
+        "purpose": "End-to-end user/control flow across systems: welcome/start-drawing/load-sample, the seven-step workflow, tool selection and keyboard routing, room type assignment, openings, interior generation, lighting, enter/exit 3D, undo/redo, and how each step mutates plan state and re-renders.",
+        "seedPaths": [
+          "js/app.js",
+          "js/editor.js",
+          "js/model.js",
+          "js/ui.js",
+          "js/viewer3d.js"
+        ],
+        "relatedPages": [
+          "/openwiki/architecture/app-controller.md",
+          "/openwiki/architecture/ui-shell.md",
+          "/openwiki/concepts/editor-2d.md",
+          "/openwiki/concepts/room-detection.md"
+        ],
+        "instructions": [
+          "Document STEP_TOOL/TOOL_STEP mapping in js/app.js and setStep/goToStep behaviour, including step >= 6 entering 3D and _last2dStep restoration on exit3D.",
+          "Document _preparePlanState step inference (furnished -> 5, openings -> 4, walls/rooms -> 3, outline -> 2, else 1) and _activatePlan/loadSample resetting state.",
+          "Document keyboard routing in App._bindWindow versus Editor2D.onKeyDown: Ctrl+Z/Shift+Ctrl+Z/Ctrl+Y, Ctrl+S, Shift held for ortho, Alt for free movement, Space for pan, G/A snap toggles, digits for typed wall length, tool keys V/H/O/W/D/N/R/L, 3 for 3D toggle, F fit, ? help.",
+          "Document the fan-out at each mutation: which App methods pass rooms/furniture flags into changed(), and where the viewer is marked dirty versus rebuilt.",
+          "Use a Mermaid stateDiagram-v2 or sequenceDiagram covering outline -> walls -> rooms -> openings -> generate -> lighting -> 3D with the App/editor/UI/viewer participants."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "7cf58ad3-35b6-469f-aa2c-a4bfc59e2431",
+        "path": "/openwiki/workflows/export-and-persistence.md",
+        "title": "Workflow — exports, imports, and local persistence",
+        "purpose": "How plans leave and enter the app: project storage in localStorage, JSON export/import, PNG blueprint capture via editor canvas cropping, GLB export via the viewer, CAD export, and the scale/resize modal, including failure and fallback behaviour.",
+        "seedPaths": [
+          "index.html",
+          "js/app.js",
+          "js/cad-io.js",
+          "js/editor.js",
+          "js/viewer3d.js"
+        ],
+        "relatedPages": [
+          "/openwiki/architecture/app-controller.md",
+          "/openwiki/concepts/viewer-3d.md",
+          "/openwiki/workflows/cad-interchange.md"
+        ],
+        "instructions": [
+          "Document downloadBlob/downloadDataURL and safeName sanitisation of illegal filename characters as the shared export path.",
+          "Document exportGLB: viewer temporarily forced active, world rebuilt if dirty, furniture group scale/position restored, ground/grid/light children excluded, binary blob resolution.",
+          "Document exportPNG view/hover save-restore discipline: editor.fit(), bounds-to-screen crop with 92px margin, DPR scaling, and guaranteed restore of view.scale/cx/cy plus hover state in finally.",
+          "Document failure surfaces users see: GLTFExporter missing rejection, JSON parse failure in _importRaw, storage unavailable toast, and 'Could not export' messages; note beforeunload flushes pending save.",
+          "Document storage keys and legacy fallback (roomcraft.projects.v1/current.v1 vs floorcraft.projects.v1/current.v1), project list normalization, and keeping at least one plan."
+        ],
+        "status": "pending"
+      },
+      {
+        "id": "2f75095f-2634-47e6-9f6b-c33731fe506d",
+        "path": "/openwiki/quickstart.md",
+        "title": "Quickstart — RoomCraft orientation and task routing",
+        "purpose": "Entry point for the wiki: what RoomCraft is (single-page browser floorplan studio with 2D drafting + Three.js dollhouse), how the code is organized around window.FC globals with no bundler, and a task-routing map into the architecture, concept, workflow, integration, operations, and testing pages.",
+        "seedPaths": [
+          "AGENTS.md",
+          "README.md",
+          "index.html",
+          "js/app.js",
+          "js/model.js"
+        ],
+        "relatedPages": [
+          "/openwiki/architecture/overview.md",
+          "/openwiki/testing/validation.md",
+          "/openwiki/workflows/editing-session.md"
+        ],
+        "instructions": [
+          "Follow the mermaid-diagrams skill rules so every diagram fence parses; keep labels short and punctuation-free.",
+          "Note that /references/cadcraft is gitignored vendored reference material (a Rust project) and is not part of the RoomCraft runtime; do not treat it as source of truth.",
+          "Route readers by task: understanding data shape -> concepts/plan-model; editing behaviour -> concepts/editor-2d + workflows/editing-session; CAD -> workflows/cad-interchange; rendering -> concepts/viewer-3d; validation -> testing/validation.",
+          "State plainly that this repo has no package.json, no build step, and no module system: js/*.js are IIFEs that attach to window.FC and are loaded by script tags in index.html in a fixed order."
+        ],
+        "status": "pending"
+      }
+    ],
+    "deletePages": [],
+    "deferredClaimPages": []
+  }
+}
