@@ -20,10 +20,12 @@
     { tool: 'pan', icon: 'hand', label: 'Pan', key: 'H' },
     { sep: true },
     { tool: 'outline', icon: 'home', label: 'Outline', key: 'O' },
+    { tool: 'rect', icon: 'box', label: 'Room / Footprint Box', key: 'B' },
     { tool: 'wall', icon: 'wall', label: 'Interior walls', key: 'W' },
     { tool: 'door', icon: 'door', label: 'Doors', key: 'D' },
     { tool: 'window', icon: 'window', label: 'Windows', key: 'N' },
     { tool: 'room', icon: 'layout', label: 'Rooms', key: 'R' },
+    { tool: 'measure', icon: 'measure', label: 'Tape Measure', key: 'M' },
     { sep: true },
     { action: 'toggle-grid', icon: 'grid', label: 'Grid snapping', key: 'G' },
     { action: 'toggle-ortho', icon: 'ortho', label: 'Straight wall & angle snap', key: 'A' },
@@ -63,6 +65,7 @@
         undoBtn: document.getElementById('undoBtn'),
         redoBtn: document.getElementById('redoBtn'),
         viewerBadge: document.getElementById('viewerBadge'),
+        unitToggleBtn: document.getElementById('unitToggleBtn'),
       };
       FC.hydrateIcons(document);
       this._bind();
@@ -136,6 +139,10 @@
       this.setViewMode(!!this.app.ui.view3d);
       this.syncWelcome();
       this.updateUndoRedo();
+      if (this.els.unitToggleBtn && this.app.plan) {
+        const imp = FC.isImperial && FC.isImperial(this.app.plan);
+        this.els.unitToggleBtn.textContent = imp ? "ft' in\"" : 'm';
+      }
       if (this.app.editor) this.app.editor.updateZoomLabel();
       this.syncSidebar();
     }
@@ -220,9 +227,16 @@
 
     updateStats() {
       const stats = this.app.stats();
+      const plan = this.app.plan;
+      const areaVal = FC.formatAreaValue ? FC.formatAreaValue(stats.area, plan, 1) : stats.area.toFixed(1);
+      const areaUnit = FC.areaUnitLabel ? FC.areaUnitLabel(plan) : 'm²';
       this.els.sideScroll.querySelectorAll('[data-stat]').forEach((node) => {
         const key = node.dataset.stat;
-        if (key === 'area') node.querySelector('.stat-value').firstChild.textContent = stats.area.toFixed(1);
+        if (key === 'area') {
+          node.querySelector('.stat-value').firstChild.textContent = areaVal;
+          const unitSpan = node.querySelector('.stat-value span');
+          if (unitSpan) unitSpan.textContent = areaUnit;
+        }
         if (key === 'rooms') node.querySelector('.stat-value').firstChild.textContent = String(stats.rooms);
         if (key === 'doors') node.querySelector('.stat-value').firstChild.textContent = String(stats.doors);
         if (key === 'furnished') {
@@ -284,19 +298,24 @@
       if (ui.view3d) {
         html = `${k('Drag')} orbit &nbsp;·&nbsp; ${k('Right-drag')} pan &nbsp;·&nbsp; ${k('Scroll')} zoom`;
       } else if (this.app.editor && this.app.editor.lengthBuffer) {
-        html = `${k('Type')} a length in metres, then ${k('Enter')} to place it`;
+        const ex = FC.isImperial && FC.isImperial(plan) ? `e.g. 12'6" or 14` : `e.g. 4.2`;
+        html = `${k('Type')} a dimension (${ex}), then ${k('Enter')} to place it`;
+      } else if (tool === 'rect') {
+        html = `${k('Click & drag')} or click two corners to draw a 4-wall room box &nbsp;·&nbsp; or type ${k('W×D')} + ${k('Enter')}`;
+      } else if (tool === 'measure') {
+        html = `${k('Click')} two points to measure distance, ΔX, ΔY, and angle &nbsp;·&nbsp; ${k('Esc')} to clear`;
       } else if (tool === 'outline') {
         if (ui.drawingFresh) {
-          if (!plan.outline.length) html = `${k('Click')} to place the first corner of the apartment`;
+          if (!plan.outline.length) html = `${k('Click')} to place the first corner of the apartment (or press ${k('B')} for Room Box)`;
           else html = `${k('Click')} corners &nbsp;·&nbsp; ${k('Enter')} to close &nbsp;·&nbsp; ${k('Esc')} to cancel &nbsp;·&nbsp; type a length`;
         } else if (plan.outline.length >= 3) {
-          html = `${k('Drag')} a corner to adjust &nbsp;·&nbsp; use ${k('Redraw outline')} in the panel`;
+          html = `${k('Drag')} a corner or wall to adjust &nbsp;·&nbsp; ${k('Double-click')} wall to insert corner &nbsp;·&nbsp; ${k('Del')} removes corner`;
         } else {
           html = `${k('Click')} to place the first corner of the apartment`;
         }
       } else if (tool === 'wall') {
         if (this.app.editor && this.app.editor.wallChain) html = `${k('Click')} next corner &nbsp;·&nbsp; ${k('Enter')} to finish &nbsp;·&nbsp; ${k('Esc')} to end`;
-        else html = `${k('Click')} to start an interior wall — keep clicking to chain walls`;
+        else html = `${k('Click')} to start an interior wall — keep clicking to chain walls (or ${k('B')} for Box)`;
       } else if (tool === 'room') {
         html = `${k('Click')} a room to choose its type`;
       } else if (tool === 'door') {
@@ -309,8 +328,8 @@
         html = `${k('Drag')} to pan &nbsp;·&nbsp; ${k('Scroll')} to zoom`;
       } else {
         const sel = ui.selection;
-        if (sel) html = `${k('Drag')} handles to edit &nbsp;·&nbsp; ${k('Delete')} removes &nbsp;·&nbsp; ${k('Esc')} to deselect`;
-        else html = `${k('Select')} a wall, door or window &nbsp;·&nbsp; ${k('Scroll')} to zoom &nbsp;·&nbsp; ${k('O')} to draw`;
+        if (sel) html = `${k('Drag')} handles to edit &nbsp;·&nbsp; ${k('Ctrl+D')} duplicate &nbsp;·&nbsp; ${k('Delete')} removes &nbsp;·&nbsp; ${k('Esc')} deselect`;
+        else html = `${k('Select')} a wall, door or furniture &nbsp;·&nbsp; ${k('Shift+Drag')} box select &nbsp;·&nbsp; ${k('B')} room box &nbsp;·&nbsp; ${k('M')} measure`;
       }
       this.els.statusHint.innerHTML = html;
     }
@@ -362,7 +381,7 @@
           </button>
         </div>
         <div class="stat-grid">
-          ${this.stat('area', stats.area.toFixed(1), 'm²', 'Floor area')}
+          ${this.stat('area', FC.formatAreaValue ? FC.formatAreaValue(stats.area, plan, 1) : stats.area.toFixed(1), FC.areaUnitLabel ? FC.areaUnitLabel(plan) : 'm²', 'Floor area')}
           ${this.stat('rooms', String(stats.rooms), '', 'Rooms')}
           ${this.stat('doors', String(stats.doors), '', 'Doors')}
           ${this.stat('furnished', furnished ? 'Yes' : '—', '', furnished ? 'Furnished' : 'Not furnished')}
@@ -448,6 +467,13 @@
       const sel = this.app.ui.selection;
       if (!sel) return '';
       const plan = this.app.plan;
+      const fmtLen = (v) => (FC.formatLength ? FC.formatLength(v, plan) : FC.fmt(v, 2) + ' m');
+      const fmtLenShort = (v, d = 2) => (FC.formatLengthShort ? FC.formatLengthShort(v, plan, d) : FC.fmt(v, d));
+      const fmtThick = (v) => (FC.formatThickness ? FC.formatThickness(v, plan) : Math.round(v * 100) + ' cm');
+      const lenUnit = FC.lengthUnitLabel ? FC.lengthUnitLabel(plan) : 'm';
+      const areaUnit = FC.areaUnitLabel ? FC.areaUnitLabel(plan) : 'm²';
+      const isImp = FC.isImperial && FC.isImperial(plan);
+
       if (sel.type === 'walls') {
         const count = (sel.keys || []).length;
         const allSegs = FC.getSegments(plan);
@@ -460,12 +486,13 @@
           </div>
           <div class="sel-metrics two">
             <div><b>${count}</b><span>walls selected</span></div>
-            <div><b>${FC.fmt(totalLen, 2)}</b><span>total length · m</span></div>
+            <div><b>${fmtLen(totalLen)}</b><span>total length</span></div>
           </div>
           <div class="btn-row two" style="margin-top:10px;">
             <button class="btn primary sm" data-action="connect-selected-walls">${I('link')} Connect walls</button>
             <button class="btn soft sm" data-action="merge-selected-walls">${I('merge')} Merge walls</button>
           </div>
+          <button class="btn soft sm" style="width:100%;margin-top:6px;" data-action="duplicate-selection">${I('copy')} Duplicate selected walls</button>
           <div class="sel-help" style="margin-top:8px;">Connect walls joins endpoints into a draggable junction node. Merge walls combines collinear in-line walls or parallel double walls into a single continuous wall.</div>
           <button class="danger-link" data-action="delete-selection" style="margin-top:8px;">${I('trash')} Delete selected walls</button>
         </div>`;
@@ -473,16 +500,19 @@
       if (sel.type === 'junction') {
         const j = sel.junction;
         const refCount = (j.refs || []).length;
+        const outlineRef = (j.refs || []).find((r) => r.type === 'outline');
+        const canDeleteCorner = outlineRef && plan.outline && plan.outline.length > 3;
         return `<div class="sel-card">
           <div class="sel-head">
-            <div><span class="eyebrow">Selected</span><div class="sel-title">Wall Junction</div></div>
+            <div><span class="eyebrow">Selected</span><div class="sel-title">${outlineRef ? 'Outline Corner / Junction' : 'Wall Junction'}</div></div>
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="sel-metrics two">
             <div><b>${refCount}</b><span>connected walls</span></div>
-            <div><b>${FC.fmt(j.x, 2)}, ${FC.fmt(j.y, 2)}</b><span>position (x, y)</span></div>
+            <div><b>${fmtLenShort(j.x, 2)}, ${fmtLenShort(j.y, 2)}</b><span>position (x, y)</span></div>
           </div>
           <div class="sel-help">Drag this junction handle directly on the canvas to slide all connected walls and doors together.</div>
+          ${canDeleteCorner ? `<button class="danger-link" style="margin-top:8px;" data-action="delete-outline-corner" data-index="${outlineRef.index}">${I('trash')} Delete outline corner</button>` : ''}
         </div>`;
       }
       if (sel.type === 'wall') {
@@ -496,20 +526,20 @@
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="sel-metrics">
-            <div><b>${FC.fmt(seg.len, 2)}</b><span>length · m</span></div>
-            <div><b>${Math.round(seg.thickness * 100)}</b><span>thickness · cm</span></div>
+            <div><b>${fmtLen(seg.len)}</b><span>length</span></div>
+            <div><b>${fmtThick(seg.thickness)}</b><span>thickness</span></div>
             <div><b>${angle}°</b><span>bearing</span></div>
           </div>
           ${parallelCandidate ? `<div class="tip" style="margin-top:8px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.28);border-radius:8px;padding:8px 10px;">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
               <div>
                 <b style="color:var(--ink-1);display:block;font-size:12px;">Parallel line detected</b>
-                <span style="font-size:11px;color:var(--ink-3);">${parallelCandidate.thicknessCm} cm separation (double wall)</span>
+                <span style="font-size:11px;color:var(--ink-3);">${fmtThick(parallelCandidate.thicknessCm / 100)} separation (double wall)</span>
               </div>
               <button class="btn primary sm" data-action="merge-parallel-wall" data-wall="${seg.id}" data-target="${parallelCandidate.wall.id}">Merge into 1</button>
             </div>
           </div>` : ''}
-          <div class="field" style="margin-top:10px;">
+          ${!seg.boundary ? `<div class="field" style="margin-top:10px;">
             <label class="num-field"><span>Resize length</span><span class="num-wrap"><input type="number" data-wall-len="${seg.id}" min="0.5" max="30" step="0.05" value="${FC.fmt(seg.len, 2)}"><em>m</em></span></label>
           </div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:6px;">
@@ -521,46 +551,56 @@
             </select>
           </div>
           <div class="btn-row" style="margin-top:6px; display:flex; gap:6px;">
-            <button class="btn soft sm" style="flex:1" data-action="wall-lengthen" data-delta="0.5" data-wall="${seg.id}">+0.5 m</button>
-            <button class="btn soft sm" style="flex:1" data-action="wall-lengthen" data-delta="1.0" data-wall="${seg.id}">+1.0 m</button>
-            ${!seg.boundary ? `<button class="btn soft sm" style="flex:1.5" data-action="wall-extend-ray" data-wall="${seg.id}" title="Extend wall along its direction to intersect the nearest wall">${I('expand')} Extend to wall</button>` : ''}
-          </div>
-          <div class="btn-row two" style="margin-top:8px;">
-            <button class="btn soft sm" data-action="wall-add-door" data-wall="${seg.id}">${I('door')} Add door</button>
-            <button class="btn soft sm" data-action="wall-add-window" data-wall="${seg.id}">${I('window')} Add window</button>
-          </div>
-          ${!seg.boundary ? `<div class="btn-row two" style="margin-top:6px;">
-            <button class="btn soft sm" data-action="wall-connect-mode" data-wall="${seg.id}" title="Click another wall to connect with this one">${I('link')} Connect wall...</button>
-            <button class="btn soft sm" data-action="wall-connect-nearest" data-wall="${seg.id}" title="Snap and join with the closest wall or corner">${I('sparkles')} Connect nearest</button>
+            <button class="btn soft sm" style="flex:1" data-action="wall-lengthen" data-delta="${isImp ? '0.3048' : '0.5'}" data-wall="${seg.id}">${isImp ? "+1'" : '+0.5 m'}</button>
+            <button class="btn soft sm" style="flex:1" data-action="wall-lengthen" data-delta="${isImp ? '0.9144' : '1.0'}" data-wall="${seg.id}">${isImp ? "+3'" : '+1.0 m'}</button>
+            <button class="btn soft sm" style="flex:1.5" data-action="wall-extend-ray" data-wall="${seg.id}" title="Extend wall along its direction to intersect the nearest wall">${I('expand')} Extend to wall</button>
           </div>` : ''}
-          ${!seg.boundary ? `<button class="btn soft sm" style="margin-top:6px;width:100%" data-action="toggle-wall-virtual" data-wall="${seg.id}">${seg.wall && seg.wall.virtual ? `${I('wall')} Convert to solid wall` : `${I('divider')} Convert to room divider (virtual)`}</button>` : ''}
-          ${!seg.boundary ? `<button class="btn soft sm" style="margin-top:6px;width:100%" data-action="wall-split" data-wall="${seg.id}">${I('sliders')} Split wall into two</button>` : ''}
-          <div class="sel-help" style="margin-top:8px;">${seg.boundary ? 'Drag the wall or its corners in Outline mode to reshape it.' : 'Drag orange handles on wall tips to extend length (doors stay fixed). Drag wall body to slide with magnetic snap to walls and doors.'}</div>
+          <div class="btn-row two" style="margin-top:8px;">
+            <button class="btn soft sm" data-action="wall-add-door" data-wall="${seg.key}">${I('door')} Add door</button>
+            <button class="btn soft sm" data-action="wall-add-window" data-wall="${seg.key}">${I('window')} Add window</button>
+          </div>
+          ${seg.boundary
+            ? `<button class="btn primary sm" style="margin-top:8px;width:100%" data-action="insert-outline-corner" data-seg-index="${seg.index}">${I('plus')} Insert corner on this wall</button>`
+            : `<div class="btn-row two" style="margin-top:6px;">
+                <button class="btn soft sm" data-action="wall-connect-mode" data-wall="${seg.id}" title="Click another wall to connect with this one">${I('link')} Connect wall...</button>
+                <button class="btn soft sm" data-action="wall-connect-nearest" data-wall="${seg.id}" title="Snap and join with the closest wall or corner">${I('sparkles')} Connect nearest</button>
+              </div>
+              <button class="btn soft sm" style="margin-top:6px;width:100%" data-action="toggle-wall-virtual" data-wall="${seg.id}">${seg.wall && seg.wall.virtual ? `${I('wall')} Convert to solid wall` : `${I('divider')} Convert to room divider (virtual)`}</button>
+              <div class="btn-row two" style="margin-top:6px;">
+                <button class="btn soft sm" data-action="wall-split" data-wall="${seg.id}">${I('sliders')} Split wall</button>
+                <button class="btn soft sm" data-action="duplicate-selection">${I('copy')} Duplicate</button>
+              </div>`}
+          <div class="sel-help" style="margin-top:8px;">${seg.boundary ? 'Drag this exterior wall to push/pull it orthogonally, or double-click on it to insert a new corner.' : 'Drag orange handles on wall tips to extend length (doors stay fixed). Drag wall body to slide with magnetic snap.'}</div>
           ${!seg.boundary ? `<button class="danger-link" data-action="delete-selection">${I('trash')} Delete wall</button>` : ''}
         </div>`;
       }
       if (sel.type === 'vertex') {
         const p = plan.outline[sel.index];
         if (!p) return '';
+        const canDelete = plan.outline && plan.outline.length > 3;
         return `<div class="sel-card">
           <div class="sel-head">
             <div><span class="eyebrow">Selected</span><div class="sel-title">Outline corner</div></div>
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="sel-metrics two">
-            <div><b>${FC.fmt(p.x, 2)}</b><span>x · m</span></div>
-            <div><b>${FC.fmt(p.y, 2)}</b><span>y · m</span></div>
+            <div><b>${fmtLenShort(p.x, 2)}</b><span>x · ${lenUnit}</span></div>
+            <div><b>${fmtLenShort(p.y, 2)}</b><span>y · ${lenUnit}</span></div>
           </div>
           <div class="sel-help">Drag the corner to reshape the footprint. Openings follow their walls.</div>
+          ${canDelete ? `<button class="danger-link" style="margin-top:8px;" data-action="delete-outline-corner" data-index="${sel.index}">${I('trash')} Delete corner</button>` : ''}
         </div>`;
       }
       if (sel.type === 'opening') {
         const op = plan.openings.find((o) => o.id === sel.id);
         if (!op) return '';
         const label = FC.openingLabel(op);
+        const seg = FC.segmentByKey(plan, op.hostKey);
+        const distA = seg ? Math.max(0, op.offset - op.width / 2) : 0;
+        const distB = seg ? Math.max(0, seg.len - (op.offset + op.width / 2)) : 0;
         return `<div class="sel-card">
           <div class="sel-head">
-            <div><span class="eyebrow">Selected</span><div class="sel-title">${label}</div></div>
+            <div><span class="eyebrow">Selected</span><div class="sel-title">${label} (${fmtLen(op.width)})</div></div>
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="num-grid">
@@ -568,6 +608,14 @@
             ${this.numField('Height', 'opHeight', 'height', op.height, 0.5, 3.2, 0.05)}
             ${op.kind === 'window' ? this.numField('Sill', 'opSill', 'sill', op.sill, 0, 2.2, 0.05) : ''}
           </div>
+          ${seg ? `<div class="num-grid" style="margin-top:6px;">
+            <label class="num-field"><span>From Corner A (${fmtLenShort(distA, 2)})</span><span class="num-wrap">
+              <input type="number" data-op-field="offsetFromA" min="0.03" max="${Math.max(0.1, seg.len - op.width - 0.03).toFixed(2)}" step="0.05" value="${FC.fmt(distA, 2)}"><em>m</em>
+            </span></label>
+            <label class="num-field"><span>From Corner B (${fmtLenShort(distB, 2)})</span><span class="num-wrap">
+              <input type="number" data-op-field="offsetFromB" min="0.03" max="${Math.max(0.1, seg.len - op.width - 0.03).toFixed(2)}" step="0.05" value="${FC.fmt(distB, 2)}"><em>m</em>
+            </span></label>
+          </div>` : ''}
           ${op.kind === 'door'
             ? `<div class="chip-row small" style="margin-top:8px;">
                 ${['single', 'double', 'sliding', 'bifold'].map((s) => `<button class="chip ${op.style === s ? 'active' : ''}" data-action="door-style" data-style="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
@@ -577,7 +625,8 @@
                 <button class="btn soft sm" style="flex:1" data-action="flip-door-hinge" data-opening="${op.id}">${I('rotate')} Hinge (${op.hinge === 'right' ? 'R' : 'L'})</button>
               </div>`
             : ''}
-          <div class="sel-help">${op.kind === 'window' ? `Sill <b data-op-sill>${op.sill.toFixed(2)}</b> m · head <b data-op-head>${(op.sill + op.height).toFixed(2)}</b> m — both must stay below the <b data-op-wall>${this.app.plan.settings.wallHeight.toFixed(2)}</b> m wall.` : 'Drag the opening along the wall to reposition it. Click Del badge to remove.'}</div>
+          <button class="btn soft sm" style="width:100%;margin-top:8px;" data-action="duplicate-selection">${I('copy')} Duplicate ${label.toLowerCase()}</button>
+          <div class="sel-help" style="margin-top:8px;">${op.kind === 'window' ? `Sill <b data-op-sill>${fmtLen(op.sill)}</b> · head <b data-op-head>${fmtLen(op.sill + op.height)}</b> — both stay below the <b data-op-wall>${fmtLen(this.app.plan.settings.wallHeight)}</b> wall.` : 'Drag the opening along the wall to reposition it; live corner offsets are shown on canvas.'}</div>
           <button class="danger-link" data-action="delete-selection">${I('trash')} Delete ${label.toLowerCase()}</button>
         </div>`;
       }
@@ -591,14 +640,15 @@
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="sel-metrics two">
-            <div><b>${FC.fmt(f.w, 2)} × ${FC.fmt(f.d, 2)}</b><span>size · m</span></div>
+            <div><b>${fmtLenShort(f.w, 2)} × ${fmtLen(f.d)}</b><span>size</span></div>
             <div><b>${rotDeg}°</b><span>rotation</span></div>
           </div>
           <div class="btn-row two" style="margin-top:10px;">
             <button class="btn soft sm" data-action="rotate-furniture" data-furniture="${f.id}">${I('rotate3d')} Rotate 90°</button>
-            <button class="btn soft sm danger" data-action="delete-selection">${I('trash')} Delete</button>
+            <button class="btn soft sm" data-action="duplicate-selection">${I('copy')} Duplicate</button>
           </div>
-          <div class="sel-help" style="margin-top:8px;">Drag to reposition anywhere in the room. Drag the round top handle to rotate freely, or press <kbd>R</kbd>.</div>
+          <button class="btn soft sm danger" style="width:100%;margin-top:6px;" data-action="delete-selection">${I('trash')} Delete</button>
+          <div class="sel-help" style="margin-top:8px;">Drag near a wall to magnetically snap flush against it (hold <kbd>Alt</kbd> for free placement). Press <kbd>R</kbd> to rotate.</div>
         </div>`;
       }
       if (sel.type === 'light') {
@@ -615,11 +665,12 @@
             <input type="range" data-light-intensity="${l.id}" min="0.2" max="2.5" step="0.1" value="${l.intensity || 1}">
           </div>
           <div class="sel-metrics two" style="margin-top:8px;">
-            <div><b>${FC.fmt(l.x, 2)}, ${FC.fmt(l.y, 2)}</b><span>pos · m</span></div>
-            <div><b>${FC.fmt(l.z || 2.4, 2)}</b><span>height · m</span></div>
+            <div><b>${fmtLenShort(l.x, 2)}, ${fmtLenShort(l.y, 2)}</b><span>pos · ${lenUnit}</span></div>
+            <div><b>${fmtLen(l.z || 2.4)}</b><span>height</span></div>
           </div>
-          <div class="btn-row" style="margin-top:10px;">
-            <button class="btn soft sm danger" style="width:100%" data-action="delete-selection">${I('trash')} Delete light</button>
+          <div class="btn-row two" style="margin-top:10px;">
+            <button class="btn soft sm" data-action="duplicate-selection">${I('copy')} Duplicate</button>
+            <button class="btn soft sm danger" data-action="delete-selection">${I('trash')} Delete</button>
           </div>
           <div class="sel-help" style="margin-top:8px;">Drag to position this light fixture. It casts real dynamic light in 3D dollhouse mode.</div>
         </div>`;
@@ -629,14 +680,15 @@
         if (!room) return '';
         const t = FC.roomTypes[room.type] || FC.roomTypes.living;
         const isManual = this.app.plan.autoDetectRooms === false || room.isManual;
+        const areaVal = FC.formatAreaValue ? FC.formatAreaValue(room.area, plan, 1) : FC.fmt(room.area, 1);
         return `<div class="sel-card">
           <div class="sel-head">
             <div><span class="eyebrow">${isManual ? 'Manual Room (Locked)' : 'Detected Room'}</span><div class="sel-title">${esc(room.name || t.label)}</div></div>
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="sel-metrics two">
-            <div><b>${FC.fmt(room.area, 1)}</b><span>floor area · m²</span></div>
-            <div><b>${room.bounds.w.toFixed(1)} × ${room.bounds.d.toFixed(1)}</b><span>room size · m</span></div>
+            <div><b>${areaVal}</b><span>floor area · ${areaUnit}</span></div>
+            <div><b>${fmtLenShort(room.bounds.w, 1)} × ${fmtLen(room.bounds.d)}</b><span>room size</span></div>
           </div>
           <div class="field" style="margin-top:10px;">
             <label class="num-field"><span>Room name / label</span><span class="num-wrap"><input type="text" data-room-name="${room.id}" value="${esc(room.name || '')}" placeholder="e.g. Master Bdrm., Great Rm., Garage..."></span></label>
@@ -685,6 +737,9 @@
       const plan = this.app.plan;
       const b = FC.planBounds(plan);
       const has = plan.outline.length >= 3;
+      const fmtLen = (v) => (FC.formatLength ? FC.formatLength(v, plan, 1) : v.toFixed(1) + ' m');
+      const fmtLenShort = (v) => (FC.formatLengthShort ? FC.formatLengthShort(v, plan, 1) : v.toFixed(1));
+      const lenUnit = FC.lengthUnitLabel ? FC.lengthUnitLabel(plan) : 'm';
       let perimeter = 0;
       for (let i = 0; i < plan.outline.length; i++) {
         const a = plan.outline[i];
@@ -693,30 +748,38 @@
       }
       return `<section class="panel-block">
         ${this.moduleHead('Outline', has ? 'Footprint' : 'Step 1 of 7')}
-        <p class="helper">${has ? 'Drag any corner to reshape the footprint. Openings and furniture stay attached.' : 'Click on the canvas to trace the outer boundary. Snap to the grid, or type an exact length.'}</p>
+        <p class="helper">${has ? 'Drag any corner or wall to reshape the footprint. Double-click an exterior wall to add a corner.' : 'Click on the canvas to trace the outer boundary, or use Room Box (B) to drag a rectangular footprint.'}</p>
         <div class="mini-stats">
-          <div><b>${has ? b.w.toFixed(1) + ' × ' + b.d.toFixed(1) : '—'}</b><span>metres</span></div>
-          <div><b>${has ? perimeter.toFixed(1) : '—'}</b><span>perimeter · m</span></div>
+          <div><b>${has ? fmtLenShort(b.w) + ' × ' + fmtLenShort(b.d) : '—'}</b><span>span · ${lenUnit}</span></div>
+          <div><b>${has ? fmtLen(perimeter) : '—'}</b><span>perimeter</span></div>
           <div><b>${has ? this.app.plan.outline.length : '0'}</b><span>corners</span></div>
         </div>
         <div class="btn-row">
-          <button class="btn soft sm" data-action="${has ? 'redraw-outline' : 'start-drawing'}">${I(has ? 'pencil' : 'home')} ${has ? 'Redraw outline' : 'Start drawing'}</button>
+          <button class="btn soft sm" data-action="${has ? 'redraw-outline' : 'start-drawing'}">${I(has ? 'pencil' : 'home')} ${has ? 'Redraw outline' : 'Trace outline'}</button>
+          <button class="btn soft sm" data-action="tool" data-tool="rect" title="Draw a rectangular footprint or room box (B)">${I('box')} Room Box</button>
           ${has ? '' : `<button class="btn soft sm" data-action="load-sample">${I('layout')} Sample</button>`}
         </div>
       </section>`;
     }
 
     wallsStepHTML() {
-      const walls = this.app.plan.walls.length;
+      const plan = this.app.plan;
+      const walls = plan.walls.length;
+      const tool = this.app.ui.tool;
+      const fmtThick = (v) => (FC.formatThickness ? FC.formatThickness(v, plan) : v.toFixed(2) + ' m');
       return `<section class="panel-block">
         ${this.moduleHead('Interior walls', walls + ' segment' + (walls === 1 ? '' : 's'))}
-        <p class="helper">Click a start point, then keep clicking to chain walls. End with <kbd>Enter</kbd> or <kbd>Esc</kbd>. Type a number for an exact length.</p>
+        <div class="tool-chips" style="margin-bottom:10px;">
+          <button class="tool-chip ${tool === 'wall' ? 'active' : ''}" data-action="tool" data-tool="wall">${I('wall')}<span>Chain Wall (W)</span></button>
+          <button class="tool-chip ${tool === 'rect' ? 'active' : ''}" data-action="tool" data-tool="rect">${I('box')}<span>Room Box (B)</span></button>
+        </div>
+        <p class="helper">Click a start point, then keep clicking to chain walls — or use <b>Room Box (B)</b> to draw 4 walls at once.</p>
         <div class="mini-stats">
-          <div><b>${this.app.plan.settings.intThickness.toFixed(2)}</b><span>inner · m</span></div>
-          <div><b>${this.app.plan.settings.extThickness.toFixed(2)}</b><span>outer · m</span></div>
+          <div><b>${fmtThick(plan.settings.intThickness)}</b><span>inner wall</span></div>
+          <div><b>${fmtThick(plan.settings.extThickness)}</b><span>outer wall</span></div>
           <div><b>${walls}</b><span>walls</span></div>
         </div>
-        <div class="hint-note">${I('info')} Walls snap to outline corners and to each other, so rooms close cleanly.</div>
+        <div class="hint-note">${I('info')} Walls snap to corners, midpoints, and alignment guides so rooms close cleanly.</div>
         <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-soft);">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
             <span class="micro-label" style="margin:0;">Double-line walls</span>
@@ -769,9 +832,10 @@
           ${preview.length ? `<div class="room-list preview-list">
             ${preview.map((cand) => {
               const t = FC.roomTypes[cand.type] || FC.roomTypes.living;
+              const areaStr = FC.formatArea ? FC.formatArea(cand.area, this.app.plan, 1) : FC.fmt(cand.area, 1) + ' m²';
               return `<div class="room-row preview-row">
                 <span class="room-dot" style="background:${t.color}"></span>
-                <span class="room-main"><b>${esc(cand.name || t.label)}</b><span>${FC.fmt(cand.area, 1)} m²</span></span>
+                <span class="room-main"><b>${esc(cand.name || t.label)}</b><span>${areaStr}</span></span>
                 <button class="btn soft xs adopt-btn" data-action="adopt-detected-room" data-candidate="${cand.id}" title="Add this detected room to your manual room layout">+ Adopt</button>
               </div>`;
             }).join('')}
@@ -788,9 +852,10 @@
             .map((r) => {
               const t = FC.roomTypes[r.type] || FC.roomTypes.living;
               const active = selectedRoom && selectedRoom.id === r.id;
+              const areaStr = FC.formatArea ? FC.formatArea(r.area, this.app.plan, 1) : FC.fmt(r.area, 1) + ' m²';
               return `<button class="room-row ${active ? 'active' : ''}" data-action="focus-room" data-room="${r.id}">
                 <span class="room-dot" style="background:${t.color}"></span>
-                <span class="room-main"><b>${esc(r.name || t.label)}</b><span>${FC.fmt(r.area, 1)} m²</span></span>
+                <span class="room-main"><b>${esc(r.name || t.label)}</b><span>${areaStr}</span></span>
                 <span class="room-kind">${t.label.replace(' room', '')}</span>
               </button>`;
             })
@@ -905,18 +970,19 @@
       const style = FC.styles[plan.style] || FC.styles.scandinavian;
       const windows = plan.openings.filter((o) => o.kind === 'window').length;
       const pieces = FC.furnitureCount(this.app.furniture || []);
+      const fmtLen = (v) => (FC.formatLength ? FC.formatLength(v, plan) : FC.fmt(v, 2) + ' m');
       return `<section class="panel-block model-block">
         ${this.moduleHead('The model', 'Live')}
         <div class="model-summary">
           <span class="model-swatch">${style.swatches.map((c) => `<i style="background:${c}"></i>`).join('')}</span>
           <div class="model-copy">
             <b>${style.name}</b>
-            <span>${plan.furnished ? pieces + ' pieces · ' : 'Unfurnished · '}${FC.fmt(s.wallHeight, 2)} m walls</span>
+            <span>${plan.furnished ? pieces + ' pieces · ' : 'Unfurnished · '}${fmtLen(s.wallHeight)} walls</span>
           </div>
         </div>
         <div class="mini-stats">
-          <div><b>${FC.fmt(s.wallHeight, 2)}</b><span>ceiling · m</span></div>
-          <div><b>${FC.fmt(s.doorHeight, 2)}</b><span>door · m</span></div>
+          <div><b>${fmtLen(s.wallHeight)}</b><span>ceiling</span></div>
+          <div><b>${fmtLen(s.doorHeight)}</b><span>door</span></div>
           <div><b>${windows}</b><span>windows</span></div>
         </div>
       </section>`;
@@ -932,10 +998,20 @@
     designHTML() {
       const plan = this.app.plan;
       const s = plan.settings;
+      const isImp = FC.isImperial && FC.isImperial(plan);
+      const wallHeightStr = FC.formatLength ? FC.formatLength(s.wallHeight, plan) : s.wallHeight.toFixed(2) + ' m';
+      const gridStepLabel = isImp ? '6 in' : '0.1 m';
       return `<section class="panel-block design-block">
-        <div class="section-head"><span class="eyebrow">Design</span><span class="mini">Walls, style & density</span></div>
+        <div class="section-head"><span class="eyebrow">Design</span><span class="mini">Units, walls & style</span></div>
+        <div class="field" style="margin-bottom:10px;">
+          <div class="field-head"><span>Measurement units</span><span class="value">${isImp ? 'Imperial (ft / in)' : 'Metric (m / cm)'}</span></div>
+          <div class="chip-row small" style="margin-top:4px;">
+            <button class="chip ${!isImp ? 'active' : ''}" style="flex:1;justify-content:center;" data-action="set-units" data-units="m">Meters (m)</button>
+            <button class="chip ${isImp ? 'active' : ''}" style="flex:1;justify-content:center;" data-action="set-units" data-units="ft">Feet &amp; Inches (ft' in")</button>
+          </div>
+        </div>
         <div class="field">
-          <div class="field-head"><span>Wall height</span><span class="value" data-setting-value="wallHeight">${s.wallHeight.toFixed(2)} m</span></div>
+          <div class="field-head"><span>Wall height</span><span class="value" data-setting-value="wallHeight">${wallHeightStr}</span></div>
           <input type="range" data-setting="wallHeight" min="2.2" max="4.2" step="0.05" value="${s.wallHeight}">
         </div>
         <div class="styles-grid">
@@ -950,7 +1026,7 @@
             .join('')}
         </div>
         <div class="toggle-list" style="margin-top:10px;">
-          ${this.toggleRow('toggle-grid', 'Snap to grid (0.1m)', 'grid', s.snapGrid !== false)}
+          ${this.toggleRow('toggle-grid', `Snap to grid (${gridStepLabel})`, 'grid', s.snapGrid !== false)}
           ${this.toggleRow('toggle-ortho', 'Straight wall snap (0°, 90°, 45°)', 'ortho', s.snapAngle !== false)}
         </div>
         <details class="structure" ${this.structureOpen ? 'open' : ''}>
@@ -1040,8 +1116,7 @@
         this.app.updateSetting(key, value);
         const label = document.querySelectorAll('[data-setting-value="' + key + '"]');
         label.forEach((node) => {
-          const unit = ['extThickness', 'intThickness', 'slabThickness', 'doorHeight', 'doorWidth', 'windowSill', 'windowHeight', 'windowWidth'].includes(key) ? ' m' : ' m';
-          node.textContent = (key === 'wallHeight' ? value.toFixed(2) : value.toFixed(2)) + (key === 'wallHeight' || unit ? ' m' : '');
+          node.textContent = FC.formatLength ? FC.formatLength(value, this.app.plan) : value.toFixed(2) + ' m';
         });
         this.paintRanges(document);
         this.syncWindowReadouts();
@@ -1124,6 +1199,21 @@
           break;
         case 'tool':
           app.setTool(el.dataset.tool);
+          break;
+        case 'toggle-units':
+          app.toggleUnits();
+          break;
+        case 'set-units':
+          app.setUnits(el.dataset.units);
+          break;
+        case 'insert-outline-corner':
+          app.insertOutlineCornerAt(parseInt(el.dataset.segIndex, 10));
+          break;
+        case 'delete-outline-corner':
+          app.deleteOutlineCorner(parseInt(el.dataset.index, 10));
+          break;
+        case 'duplicate-selection':
+          app.duplicateSelection();
           break;
         case 'toggle-grid':
           app.toggleGridSnap();
@@ -1448,6 +1538,7 @@
         [
           { label: 'Fit plan to screen', icon: 'expand', shortcut: 'F', action: () => app.fit(1) },
           { label: 'Toggle dimensions', icon: 'ruler', action: () => app.toggleDimensions() },
+          { label: `Units: ${FC.isImperial && FC.isImperial(app.plan) ? 'Switch to Meters (m)' : 'Switch to Feet & Inches (ft/in)'}`, icon: 'measure', shortcut: 'U', action: () => app.toggleUnits() },
           { label: 'Scale / Resize plan…', icon: 'sliders', action: () => app.openScaleModal() },
           { separator: true },
           { label: 'Export 3D Model (.glb)', icon: 'download', action: () => app.exportGLB() },
@@ -1480,12 +1571,14 @@
         <div class="shortcut-head">Keyboard</div>
         <div class="shortcut-grid">
           <span><kbd>V</kbd> Select</span><span><kbd>H</kbd> Pan</span>
-          <span><kbd>O</kbd> Outline</span><span><kbd>W</kbd> Walls</span>
+          <span><kbd>O</kbd> Outline</span><span><kbd>B</kbd> Room Box</span>
+          <span><kbd>W</kbd> Walls</span><span><kbd>M</kbd> Measure</span>
           <span><kbd>D</kbd> Door</span><span><kbd>N</kbd> Window</span>
-          <span><kbd>R</kbd> Rooms</span><span><kbd>3</kbd> Toggle 3D</span>
-          <span><kbd>F</kbd> Fit</span><span><kbd>Del</kbd> Delete selection</span>
+          <span><kbd>R</kbd> Rooms</span><span><kbd>U</kbd> Units (m / ft'in")</span>
+          <span><kbd>3</kbd> Toggle 3D</span><span><kbd>F</kbd> Fit</span>
+          <span><kbd>Ctrl D</kbd> Duplicate</span><span><kbd>Del</kbd> Delete selection</span>
           <span><kbd>Ctrl Z</kbd> Undo</span><span><kbd>Shift Ctrl Z</kbd> Redo</span>
-          <span><kbd>Shift</kbd> Ortho / 15°</span><span><kbd>Esc</kbd> Cancel / deselect</span>
+          <span><kbd>Shift</kbd> Ortho / Box select</span><span><kbd>Alt</kbd> Free move (no snap)</span>
         </div>
         <p class="help-foot">Everything is stored locally in your browser. Export the plan as JSON to keep a copy.</p>`,
         actions: [{ label: 'Got it', primary: true, value: true }],
@@ -1555,11 +1648,14 @@
         return items
           .map(([kind, def]) => {
             const iconSvg = I(def.icon || 'sofa');
+            const dimStr = FC.formatLength
+              ? `${FC.formatLengthShort(def.w, this.app.plan, 2)} × ${FC.formatLength(def.d, this.app.plan)}`
+              : `${def.w.toFixed(2)} × ${def.d.toFixed(2)} m`;
             return `<button type="button" class="catalog-card" data-catalog-kind="${kind}">
               <div class="catalog-card-icon">${iconSvg}</div>
               <div class="catalog-card-body">
                 <span class="catalog-card-name">${esc(def.label)}</span>
-                <span class="catalog-card-dim">${def.w.toFixed(2)} × ${def.d.toFixed(2)} m</span>
+                <span class="catalog-card-dim">${dimStr}</span>
                 <p class="catalog-card-desc">${esc(def.desc || '')}</p>
               </div>
             </button>`;

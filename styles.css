@@ -1948,6 +1948,27 @@ body.sidebar-closed .welcome {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.unit-toggle {
+  min-width: 36px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #e2e2e7;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.unit-toggle:hover {
+  background: rgba(91, 75, 246, 0.25);
+  border-color: rgba(118, 103, 255, 0.45);
+  color: #ffffff;
+}
+
 .statuspill {
   position: absolute;
   bottom: 18px;

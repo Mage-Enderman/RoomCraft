@@ -21,6 +21,7 @@
     showDims: true,
     snapGrid: true,
     snapAngle: true,
+    units: 'm',
   };
 
   FC.roomTypes = {
@@ -133,6 +134,148 @@
   };
   FC.fmt = (v, digits = 2) => (Math.round(v * 10 ** digits) / 10 ** digits).toFixed(digits);
   FC.fmt1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
+
+  /* ------------------------------------------------------------------ */
+  /* Metric (m) and Imperial (ft / in) unit helpers                     */
+  /* ------------------------------------------------------------------ */
+
+  FC.METERS_TO_FEET = 3.280839895;
+  FC.FEET_TO_METERS = 0.3048;
+  FC.INCHES_TO_METERS = 0.0254;
+  FC.SQM_TO_SQFT = 10.7639104;
+
+  FC.isImperial = function (planOrUnits) {
+    if (!planOrUnits) return false;
+    if (typeof planOrUnits === 'string') return planOrUnits === 'ft' || planOrUnits === 'imperial';
+    if (planOrUnits.settings && planOrUnits.settings.units) {
+      return planOrUnits.settings.units === 'ft' || planOrUnits.settings.units === 'imperial';
+    }
+    if (planOrUnits.units) return planOrUnits.units === 'ft' || planOrUnits.units === 'imperial';
+    return false;
+  };
+
+  FC.formatLength = function (meters, planOrUnits, decimals = 2) {
+    const val = Number(meters) || 0;
+    if (FC.isImperial(planOrUnits)) {
+      const sign = val < 0 ? '-' : '';
+      const totalInches = Math.abs(val) / FC.INCHES_TO_METERS;
+      let feet = Math.floor(totalInches / 12 + 1e-6);
+      let remInches = totalInches - feet * 12;
+      // Round to nearest 0.5 inch if decimals >= 2, else nearest 1 inch
+      const step = decimals >= 2 ? 0.5 : 1;
+      remInches = Math.round(remInches / step) * step;
+      if (remInches >= 12 - 1e-6) {
+        feet += 1;
+        remInches = 0;
+      }
+      const inStr = remInches % 1 === 0 ? String(Math.round(remInches)) : remInches.toFixed(1);
+      if (feet === 0 && remInches > 0) return `${sign}${inStr}"`;
+      if (remInches === 0) return `${sign}${feet}' 0"`;
+      return `${sign}${feet}' ${inStr}"`;
+    }
+    return FC.fmt(val, decimals) + ' m';
+  };
+
+  FC.formatLengthShort = function (meters, planOrUnits, decimals = 2) {
+    const val = Number(meters) || 0;
+    if (FC.isImperial(planOrUnits)) {
+      return FC.formatLength(val, 'ft', decimals);
+    }
+    return FC.fmt(val, decimals);
+  };
+
+  FC.formatArea = function (sqMeters, planOrUnits, decimals = 1) {
+    const val = Number(sqMeters) || 0;
+    if (FC.isImperial(planOrUnits)) {
+      const sqft = val * FC.SQM_TO_SQFT;
+      return (sqft >= 10 ? Math.round(sqft) : sqft.toFixed(1)) + ' sq ft';
+    }
+    return FC.fmt(val, decimals) + ' m²';
+  };
+
+  FC.formatAreaValue = function (sqMeters, planOrUnits) {
+    const val = Number(sqMeters) || 0;
+    if (FC.isImperial(planOrUnits)) {
+      const sqft = val * FC.SQM_TO_SQFT;
+      return sqft >= 10 ? String(Math.round(sqft)) : sqft.toFixed(1);
+    }
+    return val.toFixed(1);
+  };
+
+  FC.areaUnitLabel = function (planOrUnits) {
+    return FC.isImperial(planOrUnits) ? 'sq ft' : 'm²';
+  };
+
+  FC.lengthUnitLabel = function (planOrUnits) {
+    return FC.isImperial(planOrUnits) ? 'ft' : 'm';
+  };
+
+  FC.formatThickness = function (meters, planOrUnits) {
+    const val = Number(meters) || 0;
+    if (FC.isImperial(planOrUnits)) {
+      const inches = val / FC.INCHES_TO_METERS;
+      return (Math.round(inches * 10) / 10) + ' in';
+    }
+    return Math.round(val * 100) + ' cm';
+  };
+
+  FC.parseLengthInput = function (rawStr, planOrUnits) {
+    if (rawStr == null) return NaN;
+    const s = String(rawStr).trim();
+    if (!s) return NaN;
+
+    // Explicit feet and inches e.g. 12' 6", 12'6, 12' 6.5"
+    const ftInMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*'\s*(?:(-?\d+(?:\.\d+)?)\s*(?:"|in)?)?$/i);
+    if (ftInMatch) {
+      const ft = parseFloat(ftInMatch[1]) || 0;
+      const inc = ftInMatch[2] != null ? parseFloat(ftInMatch[2]) || 0 : 0;
+      return ft * FC.FEET_TO_METERS + (ft < 0 ? -inc : inc) * FC.INCHES_TO_METERS;
+    }
+
+    // Explicit inches only e.g. 36" or 36in
+    const inOnlyMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*(?:"|in)$/i);
+    if (inOnlyMatch) {
+      return (parseFloat(inOnlyMatch[1]) || 0) * FC.INCHES_TO_METERS;
+    }
+
+    // Explicit feet only e.g. 12ft
+    const ftOnlyMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*ft$/i);
+    if (ftOnlyMatch) {
+      return (parseFloat(ftOnlyMatch[1]) || 0) * FC.FEET_TO_METERS;
+    }
+
+    // Explicit cm or mm or m
+    const cmMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*cm$/i);
+    if (cmMatch) return (parseFloat(cmMatch[1]) || 0) * 0.01;
+    const mmMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*mm$/i);
+    if (mmMatch) return (parseFloat(mmMatch[1]) || 0) * 0.001;
+    const mMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*m$/i);
+    if (mMatch) return parseFloat(mMatch[1]) || 0;
+
+    // Hyphenated feet-inches in imperial mode e.g. 12-6 -> 12' 6"
+    if (FC.isImperial(planOrUnits)) {
+      const dashMatch = s.match(/^(\d+)\s*-\s*(\d+(?:\.\d+)?)$/);
+      if (dashMatch) {
+        const ft = parseFloat(dashMatch[1]) || 0;
+        const inc = parseFloat(dashMatch[2]) || 0;
+        return ft * FC.FEET_TO_METERS + inc * FC.INCHES_TO_METERS;
+      }
+    }
+
+    const num = parseFloat(s);
+    if (!isFinite(num)) return NaN;
+    return FC.isImperial(planOrUnits) ? num * FC.FEET_TO_METERS : num;
+  };
+
+  FC.parseBoxInput = function (rawStr, planOrUnits) {
+    if (!rawStr) return null;
+    const parts = String(rawStr).trim().split(/\s*[xX×,]\s*/);
+    if (parts.length !== 2) return null;
+    const w = FC.parseLengthInput(parts[0], planOrUnits);
+    const d = FC.parseLengthInput(parts[1], planOrUnits);
+    if (!isFinite(w) || !isFinite(d) || w <= 0.1 || d <= 0.1) return null;
+    return { w: FC.round(w, 3), d: FC.round(d, 3) };
+  };
 
   FC.pointSegment = function (p, a, b) {
     const ab = FC.sub(b, a);
@@ -506,6 +649,186 @@
     });
 
     return newWall;
+  };
+
+  FC.insertOutlineVertex = function (plan, segIndex, point) {
+    if (!plan || !Array.isArray(plan.outline) || plan.outline.length < 3) return null;
+    const n = plan.outline.length;
+    const idx = ((segIndex % n) + n) % n;
+    const a = plan.outline[idx];
+    const b = plan.outline[(idx + 1) % n];
+    const hit = point ? FC.pointSegment(point, a, b) : { t: 0.5, point: FC.lerp(a, b, 0.5) };
+    const pt = { x: FC.round(hit.point.x, 3), y: FC.round(hit.point.y, 3) };
+    const cutDist = FC.dist(a, pt);
+    const secondLen = FC.dist(pt, b);
+    if (cutDist < 0.05 || secondLen < 0.05) return null;
+
+    // Insert vertex at idx + 1
+    const insertAt = idx + 1;
+    plan.outline.splice(insertAt, 0, pt);
+
+    // Update openings hosted on outline segments:
+    // Segments o:k where k > idx shift to o:(k + 1)
+    // Segment o:idx splits at cutDist into o:idx and o:(idx + 1)
+    (plan.openings || []).forEach((op) => {
+      if (typeof op.hostKey !== 'string' || !op.hostKey.startsWith('o:')) return;
+      const k = parseInt(op.hostKey.slice(2), 10);
+      if (!isFinite(k)) return;
+      if (k > idx) {
+        op.hostKey = 'o:' + (k + 1);
+      } else if (k === idx) {
+        if (op.offset > cutDist) {
+          op.hostKey = 'o:' + (idx + 1);
+          op.offset = FC.round(clamp(op.offset - cutDist, op.width / 2 + 0.02, Math.max(op.width / 2 + 0.02, secondLen - op.width / 2 - 0.02)), 3);
+        } else {
+          op.offset = FC.round(clamp(op.offset, op.width / 2 + 0.02, Math.max(op.width / 2 + 0.02, cutDist - op.width / 2 - 0.02)), 3);
+        }
+      }
+    });
+
+    return { index: insertAt, point: pt };
+  };
+
+  FC.deleteOutlineVertex = function (plan, vertexIndex) {
+    if (!plan || !Array.isArray(plan.outline) || plan.outline.length <= 3) return false;
+    const n = plan.outline.length;
+    const idx = ((vertexIndex % n) + n) % n;
+    const prevIdx = (idx - 1 + n) % n;
+    const nextIdx = (idx + 1) % n;
+    const prevPt = plan.outline[prevIdx];
+    const nextPt = plan.outline[nextIdx];
+    const oldPrevLen = FC.dist(prevPt, plan.outline[idx]);
+    const newMergedLen = FC.dist(prevPt, nextPt);
+
+    plan.outline.splice(idx, 1);
+
+    // Update openings on outline segments:
+    // Segment o:prevIdx and o:idx merge into the new segment at index (idx === 0 ? n - 2 : prevIdx)
+    const updatedOpenings = [];
+    (plan.openings || []).forEach((op) => {
+      if (typeof op.hostKey !== 'string' || !op.hostKey.startsWith('o:')) {
+        updatedOpenings.push(op);
+        return;
+      }
+      const k = parseInt(op.hostKey.slice(2), 10);
+      if (!isFinite(k)) {
+        updatedOpenings.push(op);
+        return;
+      }
+      if (k === prevIdx) {
+        const newHostIdx = idx === 0 ? plan.outline.length - 1 : prevIdx;
+        op.hostKey = 'o:' + newHostIdx;
+        op.offset = FC.round(clamp(op.offset, op.width / 2 + 0.02, Math.max(op.width / 2 + 0.02, newMergedLen - op.width / 2 - 0.02)), 3);
+        updatedOpenings.push(op);
+      } else if (k === idx) {
+        const newHostIdx = idx === 0 ? plan.outline.length - 1 : prevIdx;
+        op.hostKey = 'o:' + newHostIdx;
+        op.offset = FC.round(clamp(oldPrevLen + op.offset, op.width / 2 + 0.02, Math.max(op.width / 2 + 0.02, newMergedLen - op.width / 2 - 0.02)), 3);
+        updatedOpenings.push(op);
+      } else if (k > idx) {
+        op.hostKey = 'o:' + (k - 1);
+        updatedOpenings.push(op);
+      } else {
+        updatedOpenings.push(op);
+      }
+    });
+    plan.openings = updatedOpenings;
+    return true;
+  };
+
+  FC.addRoomBox = function (plan, p1, p2) {
+    if (!plan || !p1 || !p2) return null;
+    const x0 = FC.round(Math.min(p1.x, p2.x), 3);
+    const y0 = FC.round(Math.min(p1.y, p2.y), 3);
+    const x1 = FC.round(Math.max(p1.x, p2.x), 3);
+    const y1 = FC.round(Math.max(p1.y, p2.y), 3);
+    const w = FC.round(x1 - x0, 3);
+    const d = FC.round(y1 - y0, 3);
+    if (w < 0.25 || d < 0.25) return null;
+
+    const corners = [
+      { x: x0, y: y0 },
+      { x: x1, y: y0 },
+      { x: x1, y: y1 },
+      { x: x0, y: y1 },
+    ];
+
+    // If plan has no closed outline yet, make this rectangle the building footprint
+    if (!plan.outline || plan.outline.length < 3) {
+      plan.outline = corners;
+      return { kind: 'outline', w, d, area: w * d, corners };
+    }
+
+    // Otherwise add 4 interior wall segments (skipping any segment that already coincides with an existing wall/outline edge)
+    plan.walls = plan.walls || [];
+    const existingSegs = FC.getSegments(plan);
+    const addedWalls = [];
+
+    for (let i = 0; i < 4; i++) {
+      const a = corners[i];
+      const b = corners[(i + 1) % 4];
+      const duplicate = existingSegs.some((s) => {
+        return (FC.dist(s.a, a) < 0.03 && FC.dist(s.b, b) < 0.03) || (FC.dist(s.a, b) < 0.03 && FC.dist(s.b, a) < 0.03);
+      });
+      if (!duplicate) {
+        const nw = { id: FC.uid('w'), a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } };
+        plan.walls.push(nw);
+        addedWalls.push(nw);
+      }
+    }
+    return { kind: 'walls', w, d, area: w * d, corners, walls: addedWalls };
+  };
+
+  FC.snapFurnitureToWalls = function (plan, item, rawX, rawY, tol = 0.35) {
+    if (!plan || !item) return null;
+    if (item.kind === 'rug' || item.kind === 'bathMat' || item.kind === 'diningTable' || item.kind === 'coffeeTable') {
+      return null;
+    }
+    const segs = FC.getSegments(plan).filter((s) => !s.wall || !s.wall.virtual);
+    if (!segs.length) return null;
+
+    const halfD = (item.d || 0.8) / 2;
+    let best = null;
+
+    segs.forEach((seg) => {
+      const hit = FC.pointSegment({ x: rawX, y: rawY }, seg.a, seg.b);
+      const wallHalfThick = (seg.thickness || 0.12) / 2;
+      const targetClearance = wallHalfThick + halfD;
+      const edgeGap = Math.abs(hit.dist - targetClearance);
+
+      // Snap when cursor is near the wall or when furniture back edge is within tol of wall face
+      if (hit.t >= 0.04 && hit.t <= 0.96 && (edgeGap <= tol || hit.dist <= targetClearance + tol * 0.6)) {
+        const dx = rawX - hit.point.x;
+        const dy = rawY - hit.point.y;
+        // Normal pointing from wall hit point toward furniture center
+        const wallNx = -Math.sin(seg.angle);
+        const wallNy = Math.cos(seg.angle);
+        const dotSide = dx * wallNx + dy * wallNy;
+        const sideSign = dotSide >= 0 ? 1 : -1;
+        const nx = wallNx * sideSign;
+        const ny = wallNy * sideSign;
+
+        const snappedX = FC.round(hit.point.x + nx * targetClearance, 3);
+        const snappedY = FC.round(hit.point.y + ny * targetClearance, 3);
+        // Furniture local -Y is its back (headboard/sofa back), so local +Y should point along (nx, ny)
+        // Since local +Y in world is (-sin(rot), cos(rot)), we want (-sin(rot), cos(rot)) = (nx, ny) => rot = atan2(-nx, ny)
+        const snappedRot = FC.round(Math.atan2(-nx, ny), 3);
+
+        const score = edgeGap;
+        if (!best || score < best.score) {
+          best = {
+            score,
+            x: snappedX,
+            y: snappedY,
+            rot: snappedRot,
+            seg,
+            wallPoint: hit.point,
+          };
+        }
+      }
+    });
+
+    return best;
   };
 
   FC.connectTwoWalls = function (plan, idA, targetIdOrKey, options) {

@@ -62,6 +62,8 @@
     armchair: '<path d="M6 19v-3m12 3v-3M7 14h10M5 9v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M8 6h8a2 2 0 0 1 2 2v2H6V8a2 2 0 0 1 2-2z"/>',
     magic: '<path d="M19 11l-4-4L3 19l4 4L19 11zM14 2l1.5 3.5L19 7l-3.5 1.5L14 12l-1.5-3.5L9 7l3.5-1.5L14 2z"/>',
     divider: '<path d="M4 12h3M10.5 12h3M17 12h3M12 4v3M12 17v3"/>',
+    box: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.8" stroke-dasharray="4 2.5"/><circle cx="3.5" cy="4.5" r="1.6" fill="currentColor"/><circle cx="20.5" cy="19.5" r="1.6" fill="currentColor"/>',
+    measure: '<path d="M3 17h18M3 13v8M21 13v8M7.5 17v-3M12 17v-4M16.5 17v-3"/><path d="M6 8l-3 2 3 2M18 8l3 2-3 2M3 10h18"/>',
     link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
     merge: '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v9M18 15v-1a4 4 0 0 0-4-4H6"/>',
   };

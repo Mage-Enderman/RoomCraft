@@ -11,6 +11,7 @@
   const TOOL_STEP = {
     outline: 1,
     wall: 2,
+    rect: 2,
     room: 3,
     door: 4,
     window: 4,
@@ -467,6 +468,11 @@
         this.editor.endWallChain();
       }
       if (this.editor) {
+        if (tool !== 'rect') this.editor.rectStart = null;
+        if (tool !== 'measure') {
+          this.editor.measureStart = null;
+          this.editor.measureEnd = null;
+        }
         this.editor.lengthBuffer = '';
         this.editor.hover = null;
         this.editor.snap = null;
@@ -679,7 +685,8 @@
       this.changed({ save: true });
       if (this.ui) this.ui.renderAll();
       if (this.editor) this.editor.draw();
-      this.toast('Adopted "' + newRoom.name + '" (' + newRoom.area.toFixed(1) + ' m²)', 'success');
+      const areaStr = FC.formatArea ? FC.formatArea(newRoom.area, this.plan, 1) : newRoom.area.toFixed(1) + ' m²';
+      this.toast('Adopted "' + newRoom.name + '" (' + areaStr + ')', 'success');
     }
 
     setRoomType(roomId, type) {
@@ -777,7 +784,8 @@
       this.select({ type: 'room', id });
       this.changed({ save: true });
       this.ui.renderAll();
-      this.toast('Added "' + rName + '" (' + area.toFixed(1) + ' m²)', 'success');
+      const areaStr = FC.formatArea ? FC.formatArea(area, this.plan, 1) : area.toFixed(1) + ' m²';
+      this.toast('Added "' + rName + '" (' + areaStr + ')', 'success');
     }
 
     toggleWallVirtual(wallId) {
@@ -798,6 +806,196 @@
       this.toast(wall.virtual ? 'Converted to Room Divider (virtual wall)' : 'Converted to Solid Wall', 'success');
     }
 
+    setUnits(units) {
+      if (!this.plan || !this.plan.settings) return;
+      const target = units === 'ft' || units === 'imperial' ? 'ft' : 'm';
+      if (this.plan.settings.units === target) return;
+      this.plan.settings.units = target;
+      this.changed({ rooms: false, furniture: false, save: true });
+      if (this.ui && this.ui.renderAll) this.ui.renderAll();
+      this.toast(target === 'ft' ? 'Units set to Feet & Inches (ft\' in")' : 'Units set to Meters (m)', 'info');
+    }
+
+    toggleUnits() {
+      if (!this.plan || !this.plan.settings) return;
+      const next = this.plan.settings.units === 'ft' ? 'm' : 'ft';
+      this.setUnits(next);
+    }
+
+    insertOutlineCornerAt(segIndex, pt) {
+      if (!this.plan || !FC.insertOutlineVertex) return;
+      let targetPt = pt;
+      if (!targetPt && segIndex != null && this.plan.outline && this.plan.outline.length >= 3) {
+        const a = this.plan.outline[segIndex];
+        const b = this.plan.outline[(segIndex + 1) % this.plan.outline.length];
+        if (a && b) targetPt = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      }
+      if (!targetPt) return;
+      this.pushHistory();
+      const res = FC.insertOutlineVertex(this.plan, segIndex, targetPt);
+      if (res) {
+        this.select({ type: 'vertex', index: res.index });
+        this.changed({ rooms: true, furniture: false, save: true });
+        this.toast('Inserted corner on exterior outline — drag it to reshape', 'success');
+      }
+    }
+
+    deleteOutlineCorner(vertexIndex) {
+      if (!this.plan || !FC.deleteOutlineVertex) return;
+      if (!this.plan.outline || this.plan.outline.length <= 3) {
+        this.toast('The exterior outline needs at least 3 corners.', 'info');
+        return;
+      }
+      this.pushHistory();
+      const ok = FC.deleteOutlineVertex(this.plan, vertexIndex);
+      if (ok) {
+        this.clearSelection();
+        this.changed({ rooms: true, furniture: false, save: true });
+        this.toast('Outline corner removed', 'success');
+      } else {
+        this.toast('Could not remove that corner without crossing the outline.', 'warning');
+      }
+    }
+
+    createRoomBox(p1, p2) {
+      if (!this.plan || !FC.addRoomBox) return;
+      const wasBlank = !this.plan.outline || this.plan.outline.length < 3;
+      this.pushHistory();
+      const res = FC.addRoomBox(this.plan, p1, p2);
+      if (!res) {
+        this.toast('Room box is too small — drag a larger rectangle', 'info');
+        return;
+      }
+      if (this.ui) {
+        this.ui.drawingFresh = false;
+        this.ui.hideWelcome();
+      }
+      this.changed({ rooms: true, furniture: true, save: true });
+      const wStr = FC.formatLength ? FC.formatLength(res.w, this.plan) : res.w.toFixed(2) + ' m';
+      const dStr = FC.formatLength ? FC.formatLength(res.d, this.plan) : res.d.toFixed(2) + ' m';
+      if (res.mode === 'outline' && wasBlank) {
+        if (this.editor) this.editor.fit();
+        this.toast(`Created ${wStr} × ${dStr} footprint`, 'success');
+      } else {
+        this.toast(`Added ${wStr} × ${dStr} room box`, 'success');
+      }
+    }
+
+    duplicateSelection() {
+      const sel = this.ui.selection;
+      if (!sel || !this.plan) return;
+      if (sel.type === 'furniture' && this.furniture) {
+        const orig = this.furniture.find((f) => f.id === sel.id);
+        if (!orig) return;
+        this.pushHistory();
+        const copy = Object.assign({}, orig, {
+          id: FC.uid('furn'),
+          x: FC.round(orig.x + 0.4, 3),
+          y: FC.round(orig.y + 0.4, 3),
+          custom: true,
+        });
+        this.furniture.push(copy);
+        this.plan.furniture = this.furniture;
+        this.select({ type: 'furniture', id: copy.id });
+        this.changed({ rooms: false, furniture: false, save: true });
+        this.toast('Duplicated ' + (orig.kind || 'item'), 'success');
+        return;
+      }
+      if (sel.type === 'light' && this.plan.lights) {
+        const orig = this.plan.lights.find((l) => l.id === sel.id);
+        if (!orig) return;
+        this.pushHistory();
+        const copy = Object.assign({}, orig, {
+          id: FC.uid('light'),
+          x: FC.round(orig.x + 0.5, 3),
+          y: FC.round(orig.y + 0.5, 3),
+        });
+        this.plan.lights.push(copy);
+        this.select({ type: 'light', id: copy.id });
+        this.changed({ rooms: false, furniture: false, save: true });
+        this.toast('Duplicated light', 'success');
+        return;
+      }
+      if (sel.type === 'opening' && this.plan.openings) {
+        const orig = this.plan.openings.find((o) => o.id === sel.id);
+        if (!orig) return;
+        const seg = FC.segmentByKey(this.plan, orig.hostKey);
+        if (!seg) return;
+        const candidates = [orig.offset + orig.width + 0.25, orig.offset - orig.width - 0.25];
+        let placedOffset = null;
+        for (const cand of candidates) {
+          if (cand >= orig.width / 2 + 0.03 && cand <= seg.len - orig.width / 2 - 0.03) {
+            if (FC.canPlaceOpening(this.plan, orig.hostKey, cand, orig.width, null)) {
+              placedOffset = FC.round(cand, 3);
+              break;
+            }
+          }
+        }
+        if (placedOffset === null) {
+          this.toast('Not enough free space on this wall to duplicate the opening', 'info');
+          return;
+        }
+        this.pushHistory();
+        const copy = Object.assign({}, orig, {
+          id: FC.uid('op'),
+          offset: placedOffset,
+        });
+        this.plan.openings.push(copy);
+        this.select({ type: 'opening', id: copy.id });
+        this.changed({ rooms: false, furniture: false, save: true });
+        this.toast('Duplicated ' + FC.openingLabel(orig), 'success');
+        return;
+      }
+      if (sel.type === 'wall' && sel.key) {
+        const seg = FC.segmentByKey(this.plan, sel.key);
+        if (!seg || seg.boundary || !seg.id) {
+          this.toast('Only interior walls can be duplicated', 'info');
+          return;
+        }
+        const orig = this.plan.walls.find((w) => w.id === seg.id);
+        if (!orig) return;
+        this.pushHistory();
+        const nx = -Math.sin(seg.angle) * 0.5;
+        const ny = Math.cos(seg.angle) * 0.5;
+        const copy = {
+          id: FC.uid('w'),
+          a: { x: FC.round(orig.a.x + nx, 3), y: FC.round(orig.a.y + ny, 3) },
+          b: { x: FC.round(orig.b.x + nx, 3), y: FC.round(orig.b.y + ny, 3) },
+        };
+        if (orig.virtual) copy.virtual = true;
+        if (orig.thickness) copy.thickness = orig.thickness;
+        this.plan.walls.push(copy);
+        this.select({ type: 'wall', key: 'w:' + copy.id });
+        this.changed({ rooms: true, furniture: false, save: true });
+        this.toast('Duplicated wall', 'success');
+        return;
+      }
+      if (sel.type === 'walls' && Array.isArray(sel.ids) && sel.ids.length) {
+        this.pushHistory();
+        const newKeys = [];
+        const newIds = [];
+        sel.ids.forEach((id) => {
+          const orig = this.plan.walls.find((w) => w.id === id);
+          if (!orig) return;
+          const copy = {
+            id: FC.uid('w'),
+            a: { x: FC.round(orig.a.x + 0.5, 3), y: FC.round(orig.a.y + 0.5, 3) },
+            b: { x: FC.round(orig.b.x + 0.5, 3), y: FC.round(orig.b.y + 0.5, 3) },
+          };
+          if (orig.virtual) copy.virtual = true;
+          if (orig.thickness) copy.thickness = orig.thickness;
+          this.plan.walls.push(copy);
+          newIds.push(copy.id);
+          newKeys.push('w:' + copy.id);
+        });
+        if (newIds.length) {
+          this.select({ type: 'walls', keys: newKeys, ids: newIds });
+          this.changed({ rooms: true, furniture: false, save: true });
+          this.toast(`Duplicated ${newIds.length} walls`, 'success');
+        }
+      }
+    }
+
     deleteSelection() {
       const sel = this.ui.selection;
       if (!sel) return;
@@ -814,8 +1012,15 @@
         return;
       }
       if (sel.type === 'vertex') {
-        this.toast('Drag an outline corner to reshape the plan.', 'info');
+        this.deleteOutlineCorner(sel.index);
         return;
+      }
+      if (sel.type === 'junction' && sel.junction && Array.isArray(sel.junction.refs)) {
+        const outlineRef = sel.junction.refs.find((r) => r.type === 'outline');
+        if (outlineRef) {
+          this.deleteOutlineCorner(outlineRef.index);
+          return;
+        }
       }
 
       if (sel.type === 'walls') {
@@ -885,6 +1090,18 @@
         op.height = FC.clamp(value, 0.3, Math.max(0.4, maxHeight));
       } else if (field === 'sill') {
         op.sill = FC.clamp(value, 0, Math.max(0, wallHeight - op.height - 0.05));
+      } else if (field === 'offsetFromA') {
+        const desiredOffset = value + op.width / 2;
+        const clamped = FC.clamp(desiredOffset, op.width / 2 + 0.03, seg.len - op.width / 2 - 0.03);
+        if (FC.canPlaceOpening(this.plan, op.hostKey, clamped, op.width, op.id)) {
+          op.offset = FC.round(clamped, 3);
+        }
+      } else if (field === 'offsetFromB') {
+        const desiredOffset = seg.len - value - op.width / 2;
+        const clamped = FC.clamp(desiredOffset, op.width / 2 + 0.03, seg.len - op.width / 2 - 0.03);
+        if (FC.canPlaceOpening(this.plan, op.hostKey, clamped, op.width, op.id)) {
+          op.offset = FC.round(clamped, 3);
+        }
       }
 
       if (this.editor) this.editor.draw();
@@ -1091,7 +1308,8 @@
       const ok = FC.resizeWall(this.plan, wallId, newLen, fromEnd);
       if (ok) {
         this.changed({ rooms: true, furniture: true, save: true });
-        this.toast('Wall resized to ' + FC.fmt(newLen, 2) + ' m', 'success');
+        const lenStr = FC.formatLength ? FC.formatLength(newLen, this.plan) : FC.fmt(newLen, 2) + ' m';
+        this.toast('Wall resized to ' + lenStr, 'success');
       }
     }
 
@@ -1210,7 +1428,8 @@
       const res = FC.extendWallToBoundary(this.plan, wallId, fromEnd);
       if (res && res.extended) {
         this.changed({ rooms: true, furniture: true, save: true });
-        this.toast(`Extended wall by ${FC.fmt(res.delta, 2)} m to nearest boundary`, 'success');
+        const dStr = FC.formatLength ? FC.formatLength(res.delta, this.plan) : FC.fmt(res.delta, 2) + ' m';
+        this.toast(`Extended wall by ${dStr} to nearest boundary`, 'success');
         if (this.editor) this.editor.draw();
       } else {
         this.toast('No intersecting wall found along this wall direction', 'info');
@@ -1231,7 +1450,8 @@
       this.pushHistory();
       FC.resizeWall(this.plan, wallId, newLen, fromEnd);
       this.changed({ rooms: true, furniture: true, save: true });
-      this.toast(`Wall length: ${FC.fmt(newLen, 2)} m (doors stay fixed)`, 'info');
+      const lenStr = FC.formatLength ? FC.formatLength(newLen, this.plan) : FC.fmt(newLen, 2) + ' m';
+      this.toast(`Wall length: ${lenStr} (doors stay fixed)`, 'info');
       if (this.editor) this.editor.draw();
     }
 
@@ -2232,6 +2452,28 @@
           this.toast('Plan saved locally', 'success');
           return;
         }
+        if (mod && key === 'd') {
+          e.preventDefault();
+          this.duplicateSelection();
+          return;
+        }
+        if (mod && key === 'c') {
+          if (this.ui.selection) {
+            this._clipboardSelection = clone(this.ui.selection);
+            this.toast('Copied selection', 'info');
+          }
+          return;
+        }
+        if (mod && key === 'v') {
+          if (this._clipboardSelection) {
+            this.ui.selection = clone(this._clipboardSelection);
+          }
+          if (this.ui.selection) {
+            e.preventDefault();
+            this.duplicateSelection();
+          }
+          return;
+        }
         if (mod) return;
 
         if (e.key === 'Shift') {
@@ -2276,6 +2518,15 @@
           e.preventDefault();
         } else if (key === 'w') {
           this.setTool('wall');
+          e.preventDefault();
+        } else if (key === 'b') {
+          this.setTool('rect');
+          e.preventDefault();
+        } else if (key === 'm') {
+          this.setTool('measure');
+          e.preventDefault();
+        } else if (key === 'u') {
+          this.toggleUnits();
           e.preventDefault();
         } else if (key === 'd') {
           this.setTool('door');

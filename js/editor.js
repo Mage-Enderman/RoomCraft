@@ -34,6 +34,9 @@
       this.wallChain = null;
       this.chainFirst = null;
       this.chainJustStarted = false;
+      this.rectStart = null;
+      this.measureStart = null;
+      this.measureEnd = null;
       this.lengthBuffer = '';
       this.lastAngle = 0;
       this.hoverOpeningWall = null;
@@ -134,9 +137,24 @@
     }
 
     gridStep() {
+      if (FC.isImperial && FC.isImperial(this.app.plan)) {
+        const ft = FC.FEET_TO_METERS || 0.3048;
+        const c = [ft * 0.25, ft * 0.5, ft, ft * 2, ft * 5, ft * 10, ft * 20, ft * 50, ft * 100];
+        for (const s of c) if (s * this.view.scale >= 15) return s;
+        return ft * 100;
+      }
       const c = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
       for (const s of c) if (s * this.view.scale >= 15) return s;
       return 1000;
+    }
+
+    snapGridValue(val) {
+      if (FC.isImperial && FC.isImperial(this.app.plan)) {
+        const step = this.view.scale > 120 ? 3 * (FC.INCHES_TO_METERS || 0.0254) : 6 * (FC.INCHES_TO_METERS || 0.0254);
+        return Math.round(val / step) * step;
+      }
+      const step = this.view.scale > 150 ? 0.05 : 0.1;
+      return Math.round(val / step) * step;
     }
 
     screenTol(px) {
@@ -199,6 +217,18 @@
         if (best) return best;
       }
 
+      // Wall midpoint snapping
+      const segs = FC.getSegments(plan);
+      for (const seg of segs) {
+        if (seg.len < 0.4) continue;
+        const mid = { x: (seg.a.x + seg.b.x) / 2, y: (seg.a.y + seg.b.y) / 2 };
+        const d = FC.dist(raw, mid);
+        if (d <= this.screenTol(11) && (!best || d < best.d)) {
+          best = { d, point: mid, type: 'midpoint', label: 'Midpoint', seg };
+        }
+      }
+      if (best) return best;
+
       // Nearest wall
       const wallHit = FC.nearestWall(plan, raw, this.screenTol(11));
       if (wallHit) {
@@ -242,38 +272,92 @@
             let point;
             const isHorizontal = Math.abs(Math.sin(angle)) < 1e-4;
             const isVertical = Math.abs(Math.cos(angle)) < 1e-4;
+            const alignGuides = [];
+            const alignTol = this.screenTol(7);
+
             if (isHorizontal) {
               const sign = Math.cos(angle) >= 0 ? 1 : -1;
               point = { x: from.x + sign * len, y: from.y };
-              if (snapGrid) point.x = Math.round(point.x * 10) / 10;
+              // Check vertical alignment with existing vertices
+              let alignedX = false;
+              for (const v of verts) {
+                if (Math.abs(v.p.x - point.x) < alignTol && Math.abs(v.p.y - point.y) > 0.05) {
+                  point.x = v.p.x;
+                  alignGuides.push({ from: v.p, to: point, axis: 'x' });
+                  alignedX = true;
+                  break;
+                }
+              }
+              if (!alignedX && snapGrid) point.x = this.snapGridValue(point.x);
             } else if (isVertical) {
               const sign = Math.sin(angle) >= 0 ? 1 : -1;
               point = { x: from.x, y: from.y + sign * len };
-              if (snapGrid) point.y = Math.round(point.y * 10) / 10;
+              let alignedY = false;
+              for (const v of verts) {
+                if (Math.abs(v.p.y - point.y) < alignTol && Math.abs(v.p.x - point.x) > 0.05) {
+                  point.y = v.p.y;
+                  alignGuides.push({ from: v.p, to: point, axis: 'y' });
+                  alignedY = true;
+                  break;
+                }
+              }
+              if (!alignedY && snapGrid) point.y = this.snapGridValue(point.y);
             } else {
               point = { x: from.x + Math.cos(angle) * len, y: from.y + Math.sin(angle) * len };
               if (snapGrid) {
-                point.x = Math.round(point.x * 10) / 10;
-                point.y = Math.round(point.y * 10) / 10;
+                point.x = this.snapGridValue(point.x);
+                point.y = this.snapGridValue(point.y);
               }
             }
             this.lastAngle = angle;
-            return { point, type: 'axis', label, from };
+            return { point, type: 'axis', label, from, alignGuides };
           }
+        }
+      }
+
+      // Smart alignment guides with existing vertices (extension tracking)
+      if (snapAngle && verts.length > 0) {
+        const alignTol = this.screenTol(7);
+        let snapX = null;
+        let snapY = null;
+        for (const v of verts) {
+          const dx = Math.abs(raw.x - v.p.x);
+          const dy = Math.abs(raw.y - v.p.y);
+          if (dx < alignTol && dy > 0.05 && (!snapX || dx < snapX.d)) {
+            snapX = { d: dx, val: v.p.x, from: v.p };
+          }
+          if (dy < alignTol && dx > 0.05 && (!snapY || dy < snapY.d)) {
+            snapY = { d: dy, val: v.p.y, from: v.p };
+          }
+        }
+        if (snapX || snapY) {
+          const point = {
+            x: snapX ? snapX.val : (snapGrid ? this.snapGridValue(raw.x) : raw.x),
+            y: snapY ? snapY.val : (snapGrid ? this.snapGridValue(raw.y) : raw.y),
+          };
+          const alignGuides = [];
+          if (snapX) alignGuides.push({ from: snapX.from, to: point, axis: 'x' });
+          if (snapY) alignGuides.push({ from: snapY.from, to: point, axis: 'y' });
+          return {
+            point,
+            type: 'align',
+            label: snapX && snapY ? 'Align X & Y' : 'Align',
+            alignGuides,
+          };
         }
       }
 
       // Grid
       if (snapGrid) {
-        const point = { x: Math.round(raw.x * 10) / 10, y: Math.round(raw.y * 10) / 10 };
+        const point = { x: this.snapGridValue(raw.x), y: this.snapGridValue(raw.y) };
         return { point, type: 'grid', label: 'Grid' };
       }
       return { point: { x: raw.x, y: raw.y }, type: 'free', label: '' };
     }
 
     typedPoint(from) {
-      const v = parseFloat(this.lengthBuffer);
-      if (!isFinite(v) || v <= 0) return null;
+      const v = FC.parseLengthInput ? FC.parseLengthInput(this.lengthBuffer, this.app.plan) : parseFloat(this.lengthBuffer);
+      if (v === null || !isFinite(v) || v <= 0) return null;
       let angle = this.lastAngle;
       if (this.pointer.inside) {
         const dx = this.pointer.wx - from.x;
@@ -299,6 +383,7 @@
       c.addEventListener('pointermove', (e) => this.onPointerMove(e));
       c.addEventListener('pointerup', (e) => this.onPointerUp(e));
       c.addEventListener('pointercancel', () => this.endDrag());
+      c.addEventListener('dblclick', (e) => this.onDoubleClick(e));
       c.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
       c.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -336,6 +421,24 @@
       });
     }
 
+    endDrag() {
+      this.drag = null;
+      this.draw();
+    }
+
+    onDoubleClick(e) {
+      if (this.app.ui.view3d) return;
+      const tool = this.app.ui.tool;
+      if (tool !== 'select' && tool !== 'outline') return;
+      const w = this.updatePointer(e);
+      const hit = this.hitTest(w);
+      if (hit && hit.type === 'wall' && hit.seg && hit.seg.boundary && !this.app.ui.drawingFresh) {
+        if (this.app.insertOutlineCornerAt) {
+          this.app.insertOutlineCornerAt(hit.seg.index, w);
+        }
+      }
+    }
+
     isTypingTarget(e) {
       const t = e.target;
       return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
@@ -364,10 +467,14 @@
         return;
       }
       const tool = this.app.ui.tool;
-      const drawing = tool === 'outline' || tool === 'wall';
-      const from = this.drawingStart();
+      const drawing = tool === 'outline' || tool === 'wall' || tool === 'divider' || tool === 'rect';
+      const from = this.drawingStart() || (tool === 'rect' && this.pointer.inside ? { x: this.pointer.wx, y: this.pointer.wy } : null);
       if (drawing && from) {
-        if (/^[0-9]$/.test(e.key) || (e.key === '.' && this.lengthBuffer.indexOf('.') < 0)) {
+        const isDigit = /^[0-9]$/.test(e.key);
+        const isDot = e.key === '.';
+        const isImpMark = e.key === "'" || e.key === '"' || e.key === '-';
+        const isBoxSep = tool === 'rect' && (e.key === 'x' || e.key === 'X' || e.key === ',');
+        if (isDigit || isDot || isImpMark || isBoxSep) {
           this.lengthBuffer += e.key;
           this.snap = null;
           this.draw();
@@ -394,10 +501,30 @@
           }
         }
         if (e.key === 'Enter' && this.lengthBuffer) {
-          const p = this.typedPoint(from);
-          if (p) {
-            this.commitPoint(p, true);
-            this.lengthBuffer = '';
+          if (tool === 'rect') {
+            const boxDims = FC.parseBoxInput
+              ? FC.parseBoxInput(this.lengthBuffer, this.app.plan)
+              : null;
+            const singleLen = !boxDims && FC.parseLengthInput
+              ? FC.parseLengthInput(this.lengthBuffer, this.app.plan)
+              : null;
+            const dims = boxDims || (singleLen > 0 ? { w: singleLen, d: singleLen } : null);
+            if (dims && this.app.createRoomBox) {
+              const startPt = this.rectStart || from;
+              const cur = this.pointer.inside ? { x: this.pointer.wx, y: this.pointer.wy } : { x: startPt.x + 1, y: startPt.y + 1 };
+              const sx = cur.x >= startPt.x ? 1 : -1;
+              const sy = cur.y >= startPt.y ? 1 : -1;
+              this.app.createRoomBox(startPt, { x: startPt.x + sx * dims.w, y: startPt.y + sy * dims.d });
+              this.rectStart = null;
+              this.drag = null;
+              this.lengthBuffer = '';
+            }
+          } else {
+            const p = this.typedPoint(from);
+            if (p) {
+              this.commitPoint(p, true);
+              this.lengthBuffer = '';
+            }
           }
           e.preventDefault();
           e.stopPropagation();
@@ -430,6 +557,17 @@
         if (this.connectMode) {
           this.endConnectMode();
           e.preventDefault();
+        } else if (this.rectStart) {
+          this.rectStart = null;
+          this.drag = null;
+          this.lengthBuffer = '';
+          this.draw();
+          e.preventDefault();
+        } else if (this.measureStart || this.measureEnd) {
+          this.measureStart = null;
+          this.measureEnd = null;
+          this.draw();
+          e.preventDefault();
         } else if (this.wallChain) {
           this.endWallChain();
           e.preventDefault();
@@ -450,6 +588,7 @@
     drawingStart() {
       const tool = this.app.ui.tool;
       if ((tool === 'wall' || tool === 'divider') && this.wallChain) return this.wallChain;
+      if (tool === 'rect' && this.rectStart) return this.rectStart;
       if (tool === 'room' && this.roomChain && this.roomChain.length) {
         return this.roomChain[this.roomChain.length - 1];
       }
@@ -515,6 +654,44 @@
         if (FC.dist(this.wallChain, snap.point) > 0.12) {
           this.addWall(this.wallChain, snap.point, isDiv);
           this.wallChain = { x: snap.point.x, y: snap.point.y };
+        }
+        this.snap = snap;
+        this.draw();
+        return;
+      }
+
+      if (tool === 'rect') {
+        const snap = this.snapPoint(w, null, { ortho: false });
+        if (!this.rectStart) {
+          this.rectStart = { x: snap.point.x, y: snap.point.y };
+          this.drag = { type: 'rect-drag', start: { x: snap.point.x, y: snap.point.y }, current: { x: snap.point.x, y: snap.point.y }, moved: false };
+          this.snap = snap;
+          this.draw();
+          return;
+        } else {
+          if (this.app.createRoomBox) {
+            this.app.createRoomBox(this.rectStart, snap.point);
+          }
+          this.rectStart = null;
+          this.drag = null;
+          this.lengthBuffer = '';
+          this.draw();
+          return;
+        }
+      }
+
+      if (tool === 'measure') {
+        const snap = this.snapPoint(w, this.measureStart && !this.measureEnd ? this.measureStart : null, { ortho: this.app.ui.ortho });
+        if (!this.measureStart || this.measureEnd) {
+          this.measureStart = { x: snap.point.x, y: snap.point.y };
+          this.measureEnd = null;
+        } else {
+          this.measureEnd = { x: snap.point.x, y: snap.point.y };
+          const d = FC.dist(this.measureStart, this.measureEnd);
+          const dx = Math.abs(this.measureEnd.x - this.measureStart.x);
+          const dy = Math.abs(this.measureEnd.y - this.measureStart.y);
+          const fmt = FC.formatLength ? (v) => FC.formatLength(v, this.app.plan) : (v) => v.toFixed(2) + ' m';
+          this.app.toast(`Distance: ${fmt(d)} (ΔX ${fmt(dx)}, ΔY ${fmt(dy)})`, 'info');
         }
         this.snap = snap;
         this.draw();
@@ -703,6 +880,11 @@
         }
       }
       this.app.clearSelection();
+      if (e.shiftKey) {
+        this.drag = { type: 'marquee', x0: w.x, y0: w.y, x1: w.x, y1: w.y, sx: this.pointer.sx, sy: this.pointer.sy, moved: false };
+        this.updateCursor();
+        return;
+      }
       this.drag = { type: 'pan', sx: this.pointer.sx, sy: this.pointer.sy, cx: this.view.cx, cy: this.view.cy };
       this.updateCursor();
     }
@@ -857,15 +1039,15 @@
       }
 
       const tool = this.app.ui.tool;
-      if (tool === 'outline' || tool === 'wall' || tool === 'divider' || tool === 'room') {
-        const from = this.drawingStart();
+      if (tool === 'outline' || tool === 'wall' || tool === 'divider' || tool === 'room' || tool === 'rect' || tool === 'measure') {
+        const from = tool === 'measure' ? (this.measureStart && !this.measureEnd ? this.measureStart : null) : this.drawingStart();
         const snap = this.snapPoint(w, from, {
           outline: tool === 'outline' && this.app.ui.drawingFresh,
           chainFirst: (tool === 'wall' || tool === 'divider') ? this.chainFirst : null,
-          ortho: this.app.ui.ortho,
+          ortho: tool === 'rect' ? false : this.app.ui.ortho,
         });
         this.snap = snap;
-        if (this.lengthBuffer) {
+        if (this.lengthBuffer && tool !== 'rect') {
           const typed = this.typedPoint(from || w);
           if (typed) this.snap = { point: typed, type: 'typed', label: 'Length' };
         }
@@ -874,6 +1056,44 @@
         this.draw();
         return;
       }
+      if (tool === 'rect') {
+        const snap = this.snapPoint(w, null, { ortho: false });
+        if (!this.rectStart) {
+          this.rectStart = { x: snap.point.x, y: snap.point.y };
+          this.drag = { type: 'rect-drag', start: { x: snap.point.x, y: snap.point.y }, current: { x: snap.point.x, y: snap.point.y }, moved: false };
+          this.snap = snap;
+          this.draw();
+          return;
+        } else {
+          if (this.app.createRoomBox) {
+            this.app.createRoomBox(this.rectStart, snap.point);
+          }
+          this.rectStart = null;
+          this.drag = null;
+          this.lengthBuffer = '';
+          this.draw();
+          return;
+        }
+      }
+
+      if (tool === 'measure') {
+        const snap = this.snapPoint(w, this.measureStart && !this.measureEnd ? this.measureStart : null, { ortho: this.app.ui.ortho });
+        if (!this.measureStart || this.measureEnd) {
+          this.measureStart = { x: snap.point.x, y: snap.point.y };
+          this.measureEnd = null;
+        } else {
+          this.measureEnd = { x: snap.point.x, y: snap.point.y };
+          const d = FC.dist(this.measureStart, this.measureEnd);
+          const dx = Math.abs(this.measureEnd.x - this.measureStart.x);
+          const dy = Math.abs(this.measureEnd.y - this.measureStart.y);
+          const fmt = FC.formatLength ? (v) => FC.formatLength(v, this.app.plan) : (v) => v.toFixed(2) + ' m';
+          this.app.toast(`Distance: ${fmt(d)} (ΔX ${fmt(dx)}, ΔY ${fmt(dy)})`, 'info');
+        }
+        this.snap = snap;
+        this.draw();
+        return;
+      }
+
       if (tool === 'door' || tool === 'window' || tool === 'opening') {
         const wallHit = FC.nearestWall(this.app.plan, w, this.screenTol(26));
         this.hoverOpeningWall = wallHit;
@@ -893,6 +1113,51 @@
       if (this.drag) {
         const wasMoving = this.drag.type !== 'pan' && this.drag.moved;
         const dragType = this.drag.type;
+        if (dragType === 'rect-drag') {
+          const dist = FC.dist(this.drag.start, this.drag.current);
+          if (dist > 0.35 && Math.abs(this.drag.current.x - this.drag.start.x) >= 0.3 && Math.abs(this.drag.current.y - this.drag.start.y) >= 0.3) {
+            if (this.app.createRoomBox) {
+              this.app.createRoomBox(this.drag.start, this.drag.current);
+            }
+            this.rectStart = null;
+            this.lengthBuffer = '';
+          }
+          this.drag = null;
+          this.draw();
+          return;
+        }
+        if (dragType === 'marquee') {
+          const minX = Math.min(this.drag.x0, this.drag.x1);
+          const maxX = Math.max(this.drag.x0, this.drag.x1);
+          const minY = Math.min(this.drag.y0, this.drag.y1);
+          const maxY = Math.max(this.drag.y0, this.drag.y1);
+          if (maxX - minX > 0.15 && maxY - minY > 0.15) {
+            const segs = FC.getSegments(this.app.plan);
+            const matchedKeys = [];
+            const matchedIds = [];
+            segs.forEach((seg) => {
+              const mid = { x: (seg.a.x + seg.b.x) / 2, y: (seg.a.y + seg.b.y) / 2 };
+              const aIn = seg.a.x >= minX && seg.a.x <= maxX && seg.a.y >= minY && seg.a.y <= maxY;
+              const bIn = seg.b.x >= minX && seg.b.x <= maxX && seg.b.y >= minY && seg.b.y <= maxY;
+              const mIn = mid.x >= minX && mid.x <= maxX && mid.y >= minY && mid.y <= maxY;
+              if ((aIn && bIn) || mIn) {
+                matchedKeys.push(seg.key);
+                if (seg.id) matchedIds.push(seg.id);
+              }
+            });
+            if (matchedKeys.length > 1) {
+              this.app.select({ type: 'walls', keys: matchedKeys, ids: matchedIds });
+            } else if (matchedKeys.length === 1) {
+              this.app.select({ type: 'wall', key: matchedKeys[0] });
+            } else if (this.app.furniture && this.app.plan.furnished) {
+              const furn = this.app.furniture.find((f) => f.x >= minX && f.x <= maxX && f.y >= minY && f.y <= maxY);
+              if (furn) this.app.select({ type: 'furniture', id: furn.id });
+            }
+          }
+          this.drag = null;
+          this.draw();
+          return;
+        }
         if (wasMoving) {
           if (dragType === 'furniture' || dragType === 'furniture-rotate') {
             const f = this.drag.furniture;
@@ -901,6 +1166,7 @@
               if (r) f.roomId = r.id;
               f.custom = true;
             }
+            this.snap = null;
             if (this.app.plan) this.app.plan.furniture = this.app.furniture;
             this.app.changed({ rooms: false, furniture: false, save: true });
           } else if (dragType === 'light' || dragType === 'opening') {
@@ -914,6 +1180,7 @@
                 FC.moveJunction(this.app.plan, this.drag.junction, otherJ.x, otherJ.y);
               }
             }
+            this.snap = null;
             this.app.changed({ rooms: true, furniture: false, save: true });
           }
         } else if (this.drag.type === 'junction') {
@@ -928,6 +1195,17 @@
 
     moveDrag(w) {
       const plan = this.app.plan;
+      if (this.drag.type === 'rect-drag') {
+        const snap = this.snapPoint(w, null, { ortho: false });
+        this.drag.current = { x: snap.point.x, y: snap.point.y };
+        this.snap = snap;
+        return;
+      }
+      if (this.drag.type === 'marquee') {
+        this.drag.x1 = w.x;
+        this.drag.y1 = w.y;
+        return;
+      }
       if (this.drag.type === 'junction') {
         if (!this.drag.pushed) {
           this.app.pushHistory();
@@ -1011,11 +1289,28 @@
         }
         const f = this.drag.furniture;
         if (!this.drag.startW) this.drag.startW = { x: w.x, y: w.y };
-        if (!this.drag.orig) this.drag.orig = { x: f.x, y: f.y };
+        if (!this.drag.orig) this.drag.orig = { x: f.x, y: f.y, rot: f.rot || 0 };
         const dx = w.x - this.drag.startW.x;
         const dy = w.y - this.drag.startW.y;
-        f.x = FC.round(this.drag.orig.x + dx, 3);
-        f.y = FC.round(this.drag.orig.y + dy, 3);
+        const candX = this.drag.orig.x + dx;
+        const candY = this.drag.orig.y + dy;
+        if (!this.altDown && FC.snapFurnitureToWalls) {
+          const wallSnap = FC.snapFurnitureToWalls(plan, f, candX, candY, this.screenTol(16));
+          if (wallSnap) {
+            f.x = wallSnap.x;
+            f.y = wallSnap.y;
+            f.rot = wallSnap.rot;
+            this.snap = { point: wallSnap.wallPoint, type: 'wall', label: 'Flush to wall' };
+          } else {
+            f.x = FC.round(candX, 3);
+            f.y = FC.round(candY, 3);
+            this.snap = null;
+          }
+        } else {
+          f.x = FC.round(candX, 3);
+          f.y = FC.round(candY, 3);
+          this.snap = null;
+        }
         f.custom = true;
         this.app.changed({ rooms: false, furniture: false, save: false });
         if (this.app.viewer) this.app.viewer.markDirty();
@@ -1230,14 +1525,30 @@
           const n = plan.outline.length;
           const i0 = seg.index;
           const i1 = (seg.index + 1) % n;
-          if (!this.drag.lastW) this.drag.lastW = { x: w.x, y: w.y };
-          const dx = w.x - this.drag.lastW.x;
-          const dy = w.y - this.drag.lastW.y;
-          plan.outline[i0].x += dx;
-          plan.outline[i0].y += dy;
-          plan.outline[i1].x += dx;
-          plan.outline[i1].y += dy;
-          this.drag.lastW = { x: w.x, y: w.y };
+          if (!this.drag.origEdge) {
+            this.drag.origEdge = {
+              a: { x: plan.outline[i0].x, y: plan.outline[i0].y },
+              b: { x: plan.outline[i1].x, y: plan.outline[i1].y },
+              angle: seg.angle,
+            };
+          }
+          if (!this.drag.startW) this.drag.startW = { x: w.x, y: w.y };
+          let dx = w.x - this.drag.startW.x;
+          let dy = w.y - this.drag.startW.y;
+          if (!this.altDown) {
+            const nx = -Math.sin(this.drag.origEdge.angle);
+            const ny = Math.cos(this.drag.origEdge.angle);
+            let proj = dx * nx + dy * ny;
+            if (this.gridSnap && this.app.plan.settings.snapGrid !== false) {
+              proj = this.snapGridValue(proj);
+            }
+            dx = nx * proj;
+            dy = ny * proj;
+          }
+          plan.outline[i0].x = FC.round(this.drag.origEdge.a.x + dx, 3);
+          plan.outline[i0].y = FC.round(this.drag.origEdge.a.y + dy, 3);
+          plan.outline[i1].x = FC.round(this.drag.origEdge.b.x + dx, 3);
+          plan.outline[i1].y = FC.round(this.drag.origEdge.b.y + dy, 3);
         } else {
           const wall = plan.walls.find((x) => x.id === seg.id);
           if (!wall) return;
@@ -1360,7 +1671,7 @@
       let c = 'default';
       if (this.drag && this.drag.type === 'pan') c = 'grabbing';
       else if (this.spaceDown || tool === 'pan') c = 'grab';
-      else if (tool === 'outline' || tool === 'wall' || tool === 'divider' || tool === 'room' || tool === 'door' || tool === 'window' || tool === 'opening') c = 'crosshair';
+      else if (tool === 'outline' || tool === 'wall' || tool === 'divider' || tool === 'room' || tool === 'rect' || tool === 'measure' || tool === 'door' || tool === 'window' || tool === 'opening') c = 'crosshair';
       else if (this.hover) c = 'pointer';
       this.canvas.style.cursor = c;
     }
@@ -1517,6 +1828,12 @@
           action: () => this.app.mergeWalls(),
         });
         items.push({
+          label: 'Duplicate selected walls',
+          icon: 'copy',
+          shortcut: 'Ctrl+D',
+          action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
+        });
+        items.push({
           label: 'Delete selected walls',
           icon: 'trash',
           danger: true,
@@ -1526,10 +1843,29 @@
         return;
       }
 
-      if (hit && hit.type === 'opening') {
+      if (hit && (hit.type === 'outline-vertex' || (hit.type === 'junction' && hit.junction && hit.junction.refs && hit.junction.refs.some((r) => r.type === 'outline')))) {
+        const outlineRef = hit.type === 'outline-vertex'
+          ? { index: hit.index }
+          : hit.junction.refs.find((r) => r.type === 'outline');
+        if (outlineRef && this.app.plan.outline && this.app.plan.outline.length > 3) {
+          this.app.select({ type: 'vertex', index: outlineRef.index });
+          items.push({
+            label: 'Delete corner',
+            icon: 'trash',
+            danger: true,
+            action: () => this.app.deleteOutlineCorner && this.app.deleteOutlineCorner(outlineRef.index),
+          });
+        }
+      } else if (hit && hit.type === 'opening') {
         const op = hit.op;
         this.app.select({ type: 'opening', id: op.id });
         const label = FC.openingLabel(op);
+        items.push({
+          label: 'Duplicate ' + label,
+          icon: 'copy',
+          shortcut: 'Ctrl+D',
+          action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
+        });
         items.push({
           label: 'Delete ' + label,
           icon: 'trash',
@@ -1573,6 +1909,12 @@
           action: () => this.app.rotateSelectedFurniture(Math.PI / 2),
         });
         items.push({
+          label: 'Duplicate ' + f.kind,
+          icon: 'copy',
+          shortcut: 'Ctrl+D',
+          action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
+        });
+        items.push({
           label: 'Delete ' + f.kind,
           icon: 'trash',
           danger: true,
@@ -1581,6 +1923,12 @@
       } else if (hit && hit.type === 'light') {
         const l = hit.light;
         this.app.select({ type: 'light', id: l.id });
+        items.push({
+          label: 'Duplicate light',
+          icon: 'copy',
+          shortcut: 'Ctrl+D',
+          action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
+        });
         items.push({
           label: 'Delete light',
           icon: 'trash',
@@ -1605,12 +1953,20 @@
           icon: 'expand',
           action: () => this.app.placeOpeningAt(seg.key, hit.offset || seg.len / 2),
         });
-        if (!seg.boundary) {
+        if (seg.boundary) {
+          items.push({ separator: true });
+          items.push({
+            label: 'Insert corner here',
+            icon: 'plus',
+            action: () => this.app.insertOutlineCornerAt && this.app.insertOutlineCornerAt(seg.index, w),
+          });
+        } else {
           const cand = seg.id && FC.findParallelWall ? FC.findParallelWall(this.app.plan, seg.id) : null;
           if (cand) {
+            const thickLabel = FC.formatThickness ? FC.formatThickness(cand.thicknessCm / 100, this.app.plan) : `${cand.thicknessCm} cm`;
             items.push({ separator: true });
             items.push({
-              label: `Merge with parallel wall (${cand.thicknessCm} cm)`,
+              label: `Merge with parallel wall (${thickLabel})`,
               icon: 'sliders',
               action: () => this.app.mergeSelectedWallWithParallel(cand.wall.id),
             });
@@ -1636,6 +1992,12 @@
             label: 'Split wall here',
             icon: 'sliders',
             action: () => this.app.splitWallAt(seg.id, w),
+          });
+          items.push({
+            label: 'Duplicate wall',
+            icon: 'copy',
+            shortcut: 'Ctrl+D',
+            action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
           });
           items.push({
             label: 'Delete wall',
@@ -1753,6 +2115,7 @@
       }
       this.drawWalls(segs);
       this.drawOpenings(segs);
+      this.drawOpeningOffsets(segs);
       this.drawLights();
       this.drawOutlineHandles();
       if (plan.settings.showDims && plan.outline.length >= 3 && !this.app.ui.drawingFresh) this.drawDims();
@@ -1835,20 +2198,30 @@
 
     drawRoomLabels(rooms) {
       const ctx = this.ctx;
+      const plan = this.app.plan;
+      const showDims = plan && plan.settings && plan.settings.showDims !== false;
       rooms.forEach((room) => {
         const type = FC.roomTypes[room.type] || FC.roomTypes.living;
         const s = this.w2s(room.centroid);
         const rw = room.bounds.w * this.view.scale;
         if (rw < 52) return;
+        const areaStr = FC.formatArea ? FC.formatArea(room.area, plan, 1) : FC.fmt(room.area, 1) + ' m²';
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#54555d';
         ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
-        ctx.fillText(room.name || type.label, s.x, s.y - 7);
+        ctx.fillText(room.name || type.label, s.x, showDims && rw >= 76 ? s.y - 12 : s.y - 7);
         ctx.fillStyle = '#8b8c94';
         ctx.font = '500 10.5px "Segoe UI", system-ui, sans-serif';
-        ctx.fillText(FC.fmt(room.area, 1) + ' m²', s.x, s.y + 9);
+        ctx.fillText(areaStr, s.x, showDims && rw >= 76 ? s.y + 3 : s.y + 9);
+        if (showDims && rw >= 76 && room.bounds && room.bounds.w > 0.4 && room.bounds.d > 0.4) {
+          const wStr = FC.formatLengthShort ? FC.formatLengthShort(room.bounds.w, plan, 1) : FC.fmt(room.bounds.w, 1);
+          const dStr = FC.formatLength ? FC.formatLength(room.bounds.d, plan, 1) : FC.fmt(room.bounds.d, 1) + ' m';
+          ctx.fillStyle = '#a0a1aa';
+          ctx.font = '500 9.5px "Segoe UI", system-ui, sans-serif';
+          ctx.fillText(wStr + ' × ' + dStr, s.x, s.y + 17);
+        }
         ctx.restore();
       });
     }
@@ -1883,7 +2256,7 @@
         const type = FC.roomTypes[cand.type] || FC.roomTypes.living;
         const s = this.w2s(cand.centroid);
         const name = cand.name || type.label;
-        const areaTxt = FC.fmt(cand.area, 1) + ' m²';
+        const areaTxt = FC.formatArea ? FC.formatArea(cand.area, this.app.plan, 1) : FC.fmt(cand.area, 1) + ' m²';
         const labelTxt = '✨ ' + name + ' · ' + areaTxt;
 
         ctx.save();
@@ -2009,7 +2382,8 @@
               ctx.stroke();
             });
           }
-          this.drawPill(mid.x, mid.y - 18, seg.len.toFixed(2) + ' m', 'dark');
+          const wallLenStr = FC.formatLength ? FC.formatLength(seg.len, this.app.plan) : seg.len.toFixed(2) + ' m';
+          this.drawPill(mid.x, mid.y - 18, wallLenStr, 'dark');
         }
       } else if (sel && sel.type === 'walls' && Array.isArray(sel.keys)) {
         sel.keys.forEach((key) => {
@@ -2167,6 +2541,85 @@
           ctx.restore();
         }
       });
+    }
+
+    drawOpeningOffsets(segs) {
+      const ctx = this.ctx;
+      const plan = this.app.plan;
+      const sel = this.app.ui.selection;
+      let targetSeg = null;
+      let offset = 0;
+      let width = 0;
+
+      if (this.drag && this.drag.type === 'opening') {
+        const op = plan.openings.find((o) => o.id === this.drag.id);
+        if (op) {
+          targetSeg = segs.find((s) => s.key === op.hostKey);
+          offset = op.offset;
+          width = op.width;
+        }
+      } else if (sel && sel.type === 'opening') {
+        const op = plan.openings.find((o) => o.id === sel.id);
+        if (op) {
+          targetSeg = segs.find((s) => s.key === op.hostKey);
+          offset = op.offset;
+          width = op.width;
+        }
+      } else if (this.hover && this.hover.type === 'opening' && this.hover.op) {
+        const op = this.hover.op;
+        targetSeg = segs.find((s) => s.key === op.hostKey);
+        offset = op.offset;
+        width = op.width;
+      } else if ((this.app.ui.tool === 'door' || this.app.ui.tool === 'window' || this.app.ui.tool === 'opening') && this.hoverOpeningWall) {
+        const hit = this.hoverOpeningWall;
+        const kind = this.app.ui.tool === 'window' ? 'window' : this.app.ui.tool === 'opening' ? 'opening' : 'door';
+        const def = FC.defaultOpening(plan, kind, hit.seg.key, hit.offset);
+        targetSeg = hit.seg;
+        width = Math.min(def.width, hit.seg.len - 0.14);
+        offset = FC.clamp(hit.offset, width / 2 + 0.03, hit.seg.len - width / 2 - 0.03);
+      }
+
+      if (!targetSeg || targetSeg.len <= width + 0.05) return;
+      const leftDist = Math.max(0, offset - width / 2);
+      const rightDist = Math.max(0, targetSeg.len - (offset + width / 2));
+      const dir = { x: Math.cos(targetSeg.angle), y: Math.sin(targetSeg.angle) };
+      const norm = { x: -dir.y, y: dir.x };
+      const dimOffset = targetSeg.thickness / 2 + this.screenTol(18);
+
+      const drawSpan = (p0, p1, distMeters) => {
+        if (distMeters < 0.08) return;
+        const o0 = { x: p0.x + norm.x * dimOffset, y: p0.y + norm.y * dimOffset };
+        const o1 = { x: p1.x + norm.x * dimOffset, y: p1.y + norm.y * dimOffset };
+        const s0 = this.w2s(o0);
+        const s1 = this.w2s(o1);
+        if (Math.hypot(s1.x - s0.x, s1.y - s0.y) < 34) return;
+        ctx.save();
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(s0.x, s0.y);
+        ctx.lineTo(s1.x, s1.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // End ticks
+        [s0, s1].forEach((sp) => {
+          ctx.beginPath();
+          ctx.moveTo(sp.x - norm.x * 4, sp.y - norm.y * 4);
+          ctx.lineTo(sp.x + norm.x * 4, sp.y + norm.y * 4);
+          ctx.stroke();
+        });
+        const midX = (s0.x + s1.x) / 2;
+        const midY = (s0.y + s1.y) / 2;
+        const txt = FC.formatLength ? FC.formatLength(distMeters, plan) : distMeters.toFixed(2) + ' m';
+        this.drawPill(midX, midY, txt, 'light');
+        ctx.restore();
+      };
+
+      const opStart = FC.lerp(targetSeg.a, targetSeg.b, leftDist / targetSeg.len);
+      const opEnd = FC.lerp(targetSeg.a, targetSeg.b, (offset + width / 2) / targetSeg.len);
+      drawSpan(targetSeg.a, opStart, leftDist);
+      drawSpan(opEnd, targetSeg.b, rightDist);
     }
 
     drawDoor(pl, s, dir, n, half, thick, active) {
@@ -2431,7 +2884,7 @@
           ctx.lineTo(px + Math.sin(ang) * 4, py - Math.cos(ang) * 4);
           ctx.stroke();
         });
-        const text = FC.fmt(len, 2) + ' m';
+        const text = FC.formatLength ? FC.formatLength(len, plan) : FC.fmt(len, 2) + ' m';
         const tw = ctx.measureText(text).width + 12;
         const px = (soa.x + sob.x) / 2;
         const py = (soa.y + sob.y) / 2;
@@ -2647,7 +3100,9 @@
           ctx.stroke();
 
           ctx.restore();
-          this.drawPill(s.x, s.y - d / 2 - 16, (it.kind || 'Furniture') + ' • ' + it.w.toFixed(2) + '×' + it.d.toFixed(2) + 'm', 'dark');
+          const fwStr = FC.formatLength ? FC.formatLength(it.w, this.app.plan) : it.w.toFixed(2) + 'm';
+          const fdStr = FC.formatLength ? FC.formatLength(it.d, this.app.plan) : it.d.toFixed(2) + 'm';
+          this.drawPill(s.x, s.y - d / 2 - 16, (it.kind || 'Furniture') + ' • ' + fwStr + ' × ' + fdStr, 'dark');
         }
       });
       ctx.restore();
@@ -2784,6 +3239,98 @@
         ctx.restore();
       }
 
+      if (tool === 'rect' && (this.rectStart || (this.drag && this.drag.type === 'rect-drag'))) {
+        const p1 = this.drag && this.drag.type === 'rect-drag' ? this.drag.start : this.rectStart;
+        const p2 = this.drag && this.drag.type === 'rect-drag'
+          ? this.drag.current
+          : (this.snap ? this.snap.point : { x: this.pointer.wx, y: this.pointer.wy });
+        if (p1 && p2) {
+          const s1 = this.w2s(p1);
+          const s2 = this.w2s(p2);
+          const rx = Math.min(s1.x, s2.x);
+          const ry = Math.min(s1.y, s2.y);
+          const rw = Math.abs(s2.x - s1.x);
+          const rh = Math.abs(s2.y - s1.y);
+          const wMeters = Math.abs(p2.x - p1.x);
+          const dMeters = Math.abs(p2.y - p1.y);
+          ctx.save();
+          ctx.fillStyle = 'rgba(91, 75, 246, 0.12)';
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.fillRect(rx, ry, rw, rh);
+          ctx.strokeRect(rx, ry, rw, rh);
+          ctx.setLineDash([]);
+          this.handleDot(s1, true);
+          this.handleDot(s2, true);
+          if (wMeters > 0.05 || dMeters > 0.05) {
+            const wStr = FC.formatLength ? FC.formatLength(wMeters, plan) : wMeters.toFixed(2) + ' m';
+            const dStr = FC.formatLength ? FC.formatLength(dMeters, plan) : dMeters.toFixed(2) + ' m';
+            const areaStr = FC.formatArea ? FC.formatArea(wMeters * dMeters, plan, 1) : (wMeters * dMeters).toFixed(1) + ' m²';
+            this.drawPill(rx + rw / 2, ry + rh / 2, `${wStr} × ${dStr} · ${areaStr}`, 'accent');
+          }
+          ctx.restore();
+        }
+      }
+
+      if (this.measureStart) {
+        const p1 = this.measureStart;
+        const p2 = this.measureEnd || (this.snap ? this.snap.point : { x: this.pointer.wx, y: this.pointer.wy });
+        if (p1 && p2) {
+          const s1 = this.w2s(p1);
+          const s2 = this.w2s(p2);
+          const dist = FC.dist(p1, p2);
+          const dx = Math.abs(p2.x - p1.x);
+          const dy = Math.abs(p2.y - p1.y);
+          const ang = Math.round((Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180) / Math.PI);
+          ctx.save();
+          // Orthogonal componentlegs
+          ctx.strokeStyle = 'rgba(16, 185, 129, 0.45)';
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(s1.x, s1.y);
+          ctx.lineTo(s2.x, s1.y);
+          ctx.lineTo(s2.x, s2.y);
+          ctx.stroke();
+          // Main tape line
+          ctx.strokeStyle = '#059669';
+          ctx.lineWidth = 2.2;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.moveTo(s1.x, s1.y);
+          ctx.lineTo(s2.x, s2.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          this.handleDot(s1, true);
+          this.handleDot(s2, true);
+          if (dist > 0.01) {
+            const dStr = FC.formatLength ? FC.formatLength(dist, plan) : dist.toFixed(2) + ' m';
+            const dxStr = FC.formatLengthShort ? FC.formatLengthShort(dx, plan, 2) : dx.toFixed(2);
+            const dyStr = FC.formatLengthShort ? FC.formatLengthShort(dy, plan, 2) : dy.toFixed(2);
+            this.drawPill((s1.x + s2.x) / 2, (s1.y + s2.y) / 2 - 18, `📏 ${dStr} · ΔX ${dxStr} ΔY ${dyStr} · ${ang}°`, 'dark');
+          }
+          ctx.restore();
+        }
+      }
+
+      if (this.drag && this.drag.type === 'marquee') {
+        const s0 = this.w2s({ x: this.drag.x0, y: this.drag.y0 });
+        const s1 = this.w2s({ x: this.drag.x1, y: this.drag.y1 });
+        const rx = Math.min(s0.x, s1.x);
+        const ry = Math.min(s0.y, s1.y);
+        const rw = Math.abs(s1.x - s0.x);
+        const rh = Math.abs(s1.y - s0.y);
+        ctx.save();
+        ctx.fillStyle = 'rgba(91, 75, 246, 0.10)';
+        ctx.strokeStyle = ACCENT;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.fillRect(rx, ry, rw, rh);
+        ctx.strokeRect(rx, ry, rw, rh);
+        ctx.restore();
+      }
+
       if ((tool === 'door' || tool === 'window' || tool === 'opening') && this.hoverOpeningWall) {
         const hit = this.hoverOpeningWall;
         const kind = tool === 'window' ? 'window' : tool === 'opening' ? 'opening' : 'door';
@@ -2815,14 +3362,14 @@
     }
 
     drawMeasure(a, b, len) {
-      const ctx = this.ctx;
       const mx = (a.x + b.x) / 2;
       const my = (a.y + b.y) / 2;
       const angle = Math.atan2(b.y - a.y, b.x - a.x);
       const off = 18;
       const nx = -Math.sin(angle) * off;
       const ny = Math.cos(angle) * off;
-      this.drawPill(mx + nx, my + ny, FC.fmt(len, 2) + ' m · ' + Math.round((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI) + '°', 'accent');
+      const lenStr = FC.formatLength ? FC.formatLength(len, this.app.plan) : FC.fmt(len, 2) + ' m';
+      this.drawPill(mx + nx, my + ny, lenStr + ' · ' + Math.round((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI) + '°', 'accent');
     }
 
     drawHover(segs) {
@@ -2910,14 +3457,34 @@
         ctx.restore();
       }
 
-      ctx.strokeStyle = typed ? ACCENT : this.snap.type === 'close' ? '#e0952f' : ACCENT;
+      if (this.snap.alignGuides && this.snap.alignGuides.length) {
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = '#0ea5e9';
+        ctx.lineWidth = 1.3;
+        this.snap.alignGuides.forEach((g) => {
+          const sf = this.w2s(g.from);
+          const st = this.w2s(g.to);
+          ctx.beginPath();
+          ctx.moveTo(sf.x, sf.y);
+          ctx.lineTo(st.x, st.y);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(sf.x, sf.y, 3.5, 0, TAU);
+          ctx.fillStyle = '#0ea5e9';
+          ctx.fill();
+        });
+        ctx.restore();
+      }
+
+      ctx.strokeStyle = typed ? ACCENT : this.snap.type === 'close' ? '#e0952f' : this.snap.type === 'midpoint' ? '#0ea5e9' : ACCENT;
       ctx.fillStyle = typed ? ACCENT : this.snap.type === 'close' ? '#e0952f' : '#ffffff';
       ctx.lineWidth = 1.8;
       ctx.beginPath();
       ctx.arc(s.x, s.y, this.snap.type === 'close' ? 8 : 5.5, 0, TAU);
       ctx.fill();
       ctx.stroke();
-      if (this.snap.type === 'point' || this.snap.type === 'close' || this.snap.type === 'axis' || this.snap.type === 'wall' || this.snap.type === 'door') {
+      if (this.snap.type === 'point' || this.snap.type === 'close' || this.snap.type === 'axis' || this.snap.type === 'wall' || this.snap.type === 'door' || this.snap.type === 'midpoint' || this.snap.type === 'align') {
         const label = this.snap.label;
         if (label) this.drawPill(s.x, s.y - 20, label, this.snap.type === 'close' ? 'warning' : (this.snap.type === 'door' ? 'accent' : 'light'));
       }
@@ -2925,14 +3492,17 @@
     }
 
     drawLengthInput() {
-      const from = this.drawingStart();
+      const tool = this.app.ui.tool;
+      const from = this.drawingStart() || (tool === 'rect' && this.pointer.inside ? { x: this.pointer.wx, y: this.pointer.wy } : null);
       if (!from) return;
       const ctx = this.ctx;
-      const typed = this.typedPoint(from);
-      const p = typed ? typed : this.pointer;
+      const typed = tool !== 'rect' ? this.typedPoint(from) : null;
+      const p = typed ? typed : { x: this.pointer.wx, y: this.pointer.wy };
       const s = this.w2s({ x: p.x, y: p.y });
+      const hasUnitMark = /['"xX,-]/.test(this.lengthBuffer);
+      const unitSuffix = hasUnitMark ? '' : ' ' + (FC.lengthUnitLabel ? FC.lengthUnitLabel(this.app.plan) : 'm');
       ctx.save();
-      this.drawPill(s.x + 26, s.y + 32, this.lengthBuffer + ' m  ⏎', 'accent');
+      this.drawPill(s.x + 26, s.y + 32, this.lengthBuffer + unitSuffix + '  ⏎', 'accent');
       ctx.restore();
     }
 
