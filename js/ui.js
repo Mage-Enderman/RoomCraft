@@ -1,4 +1,4 @@
-/* Floorcraft — UI chrome, panels, menus and dialogs */
+/* RoomCraft — UI chrome, panels, menus and dialogs */
 (function () {
   const FC = (window.FC = window.FC || {});
   const I = (name, cls) => FC.icon(name, cls);
@@ -475,6 +475,7 @@
             <button class="btn soft sm" data-action="wall-add-door" data-wall="${seg.id}">${I('door')} Add door</button>
             <button class="btn soft sm" data-action="wall-add-window" data-wall="${seg.id}">${I('window')} Add window</button>
           </div>
+          ${!seg.boundary ? `<button class="btn soft sm" style="margin-top:6px;width:100%" data-action="toggle-wall-virtual" data-wall="${seg.id}">${seg.wall && seg.wall.virtual ? `${I('wall')} Convert to solid wall` : `${I('divider')} Convert to room divider (virtual)`}</button>` : ''}
           ${!seg.boundary ? `<button class="btn soft sm" style="margin-top:6px;width:100%" data-action="wall-split" data-wall="${seg.id}">${I('sliders')} Split wall into two</button>` : ''}
           <div class="sel-help" style="margin-top:8px;">${seg.boundary ? 'Drag the wall or its corners in Outline mode to reshape it.' : 'Drag the wall to move it, drag junction nodes to move connected walls together, or type an exact length above.'}</div>
           ${!seg.boundary ? `<button class="danger-link" data-action="delete-selection">${I('trash')} Delete wall</button>` : ''}
@@ -511,7 +512,7 @@
           </div>
           ${op.kind === 'door'
             ? `<div class="chip-row small" style="margin-top:8px;">
-                ${['single', 'double', 'sliding'].map((s) => `<button class="chip ${op.style === s ? 'active' : ''}" data-action="door-style" data-style="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
+                ${['single', 'double', 'sliding', 'bifold'].map((s) => `<button class="chip ${op.style === s ? 'active' : ''}" data-action="door-style" data-style="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
               </div>
               <div class="btn-row" style="margin-top:8px;">
                 <button class="btn soft sm" style="width:100%" data-action="flip-door" data-opening="${op.id}">${I('rotate3d')} Flip door swing</button>
@@ -567,16 +568,28 @@
       if (sel.type === 'room') {
         const room = this.app.rooms.find((r) => r.id === sel.id);
         if (!room) return '';
+        const t = FC.roomTypes[room.type] || FC.roomTypes.living;
         return `<div class="sel-card">
           <div class="sel-head">
-            <div><span class="eyebrow">Selected</span><div class="sel-title">${esc(room.name)}</div></div>
+            <div><span class="eyebrow">Selected Room</span><div class="sel-title">${esc(room.name || t.label)}</div></div>
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="sel-metrics two">
             <div><b>${FC.fmt(room.area, 1)}</b><span>floor area · m²</span></div>
             <div><b>${room.bounds.w.toFixed(1)} × ${room.bounds.d.toFixed(1)}</b><span>room size · m</span></div>
           </div>
-          ${this.typeGrid(room)}
+          <div class="field" style="margin-top:10px;">
+            <label class="num-field"><span>Room name / label</span><span class="num-wrap"><input type="text" data-room-name="${room.id}" value="${esc(room.name || '')}" placeholder="e.g. Master Bdrm., Great Rm., Garage..."></span></label>
+          </div>
+          <div style="margin-top:10px;">
+            <div class="micro-label" style="margin-bottom:6px;">Room type & furnishing</div>
+            ${this.typeGrid(room)}
+          </div>
+          <div class="btn-row two" style="margin-top:10px;">
+            <button class="btn soft sm" data-action="tool" data-tool="divider" title="Draw an invisible room divider to partition this space">${I('divider')} Split with divider</button>
+            <button class="btn soft sm" data-action="furnish-room" data-room="${room.id}" title="Re-furnish this room">${I('magic')} Re-furnish</button>
+          </div>
+          <button class="danger-link" data-action="delete-room" data-room="${room.id}">${I('trash')} Remove this room</button>
         </div>`;
       }
       return '';
@@ -655,30 +668,32 @@
 
     roomsStepHTML() {
       const rooms = this.app.rooms;
-      if (!rooms.length) {
-        return `<section class="panel-block">
-          ${this.moduleHead('Rooms', 'Step 3 of 7')}
-          <p class="helper">No enclosed rooms yet. Draw walls that meet the outline or each other and rooms appear here automatically.</p>
-          <button class="btn soft sm" data-action="tool" data-tool="wall">${I('wall')} Draw interior walls</button>
-        </section>`;
-      }
+      const tool = this.app.ui.tool;
       const selectedRoom = this.app.ui.selection && this.app.ui.selection.type === 'room' ? this.app.rooms.find((r) => r.id === this.app.ui.selection.id) : null;
       return `<section class="panel-block">
         ${this.moduleHead('Rooms', rooms.length + ' detected')}
-        <div class="room-list">
+        <div class="tool-chips" style="margin-bottom:12px;">
+          <button class="tool-chip ${tool === 'room' ? 'active' : ''}" data-action="tool" data-tool="room" title="Click corners on canvas to manually trace a custom room polygon">${I('layout')}<span>Draw room</span></button>
+          <button class="tool-chip ${tool === 'divider' ? 'active' : ''}" data-action="tool" data-tool="divider" title="Draw an invisible partition line to separate open-concept spaces">${I('divider')}<span>Room divider</span></button>
+        </div>
+        <p class="helper tight">Rooms are found automatically. Use <b>Draw room</b> to trace custom spaces, or <b>Room divider</b> to partition open spaces like Kitchen, Dining, and Great Room without solid 3D walls.</p>
+        ${rooms.length ? `<div class="room-list" style="margin-top:10px;">
           ${rooms
             .map((r) => {
               const t = FC.roomTypes[r.type] || FC.roomTypes.living;
               const active = selectedRoom && selectedRoom.id === r.id;
               return `<button class="room-row ${active ? 'active' : ''}" data-action="focus-room" data-room="${r.id}">
                 <span class="room-dot" style="background:${t.color}"></span>
-                <span class="room-main"><b>${esc(r.name)}</b><span>${FC.fmt(r.area, 1)} m²</span></span>
-                <span class="room-kind">${t.label.replace(' room', '').replace('Living', 'Living')}</span>
+                <span class="room-main"><b>${esc(r.name || t.label)}</b><span>${FC.fmt(r.area, 1)} m²</span></span>
+                <span class="room-kind">${t.label.replace(' room', '')}</span>
               </button>`;
             })
             .join('')}
-        </div>
-        ${selectedRoom ? `<div class="room-types"><div class="micro-label">Room type</div>${this.typeGrid(selectedRoom)}</div>` : `<p class="helper tight">Select a room to change its type and furnishing recipe.</p>`}
+        </div>` : `<p class="helper" style="margin-top:10px;">No enclosed rooms yet. Draw walls or click <b>Draw room</b> above to define spaces.</p>`}
+        ${selectedRoom ? `<div class="room-types" style="margin-top:12px;">
+          <div class="micro-label" style="margin-bottom:6px;">Type: ${esc(selectedRoom.name || 'Room')}</div>
+          ${this.typeGrid(selectedRoom)}
+        </div>` : `<p class="helper tight" style="margin-top:10px;">Click any room on canvas or in list above to rename, assign type, or partition.</p>`}
       </section>`;
     }
 
@@ -962,6 +977,10 @@
         }
         return;
       }
+      if (el.dataset && el.dataset.roomName) {
+        this.app.setRoomName(el.dataset.roomName, el.value);
+        return;
+      }
       if (el.dataset && el.dataset.lightIntensity) {
         this.ensureHistory(el);
         const value = parseFloat(el.value);
@@ -1096,6 +1115,16 @@
           break;
         case 'consolidate-double-walls':
           app.consolidateDoubleWalls();
+          break;
+        case 'toggle-wall-virtual':
+          app.toggleWallVirtual(el.dataset.wall);
+          break;
+        case 'delete-room':
+          app.deleteRoom(el.dataset.room);
+          break;
+        case 'furnish-room':
+          app.recomputeFurniture();
+          this.renderAll();
           break;
         case 'flip-door':
           app.flipDoor();
@@ -1274,7 +1303,7 @@
           { label: 'Import plan…', icon: 'upload', action: () => app.importJSON() },
           { separator: true },
           { label: 'Keyboard shortcuts', icon: 'key', shortcut: '?', action: () => this.showHelp() },
-          { label: 'About Floorcraft', icon: 'info', action: () => this.showAbout() },
+          { label: 'About RoomCraft', icon: 'info', action: () => this.showAbout() },
         ],
         'right',
       );
@@ -1282,14 +1311,14 @@
 
     showHelp() {
       this.showModal({
-        title: 'Floorcraft quick start',
+        title: 'RoomCraft quick start',
         eyebrow: 'Help',
         html: `<div class="help-grid">
           <div class="help-item"><span class="key">1</span><div><b>Trace the outline</b><p>Click corners on the canvas. Close the loop by clicking the first corner or pressing Enter.</p></div></div>
           <div class="help-item"><span class="key">2</span><div><b>Add inner walls</b><p>Keep clicking to chain partitions. Walls snap to corners and to each other.</p></div></div>
           <div class="help-item"><span class="key">3</span><div><b>Type the rooms</b><p>Rooms are found automatically. Click one to pick a type — that selects its furniture.</p></div></div>
           <div class="help-item"><span class="key">4</span><div><b>Drop openings</b><p>Place doors and windows on walls. Drag them to move; edit width, height and sill in the panel.</p></div></div>
-          <div class="help-item"><span class="key">5</span><div><b>Generate the interior</b><p>Pick a style and furnishing level, then let Floorcraft furnish each room by type.</p></div></div>
+          <div class="help-item"><span class="key">5</span><div><b>Generate the interior</b><p>Pick a style and furnishing level, then let RoomCraft furnish each room by type.</p></div></div>
           <div class="help-item"><span class="key">6</span><div><b>Make it 3D</b><p>Explore real wall heights and cut openings, relight the scene with the time-of-day slider, and save an image.</p></div></div>
         </div>
         <div class="shortcut-head">Keyboard</div>
@@ -1309,11 +1338,11 @@
 
     showAbout() {
       this.showModal({
-        title: 'About Floorcraft',
+        title: 'About RoomCraft',
         eyebrow: 'Beta',
         html: `<div class="about">
           <div class="about-mark">${I('home')}</div>
-          <p><b>Floorcraft</b> is a sketch-to-3D floorplan studio. Draw walls with CAD-style snapping, configure real construction heights, furnish by room type and walk through the result.</p>
+          <p><b>RoomCraft</b> is a sketch-to-3D floorplan studio. Draw walls with CAD-style snapping, configure real construction heights, furnish by room type and walk through the result.</p>
           <p class="muted">Built with vanilla JavaScript, Canvas 2D and Three.js. Your plans never leave this browser.</p>
           <div class="about-badges"><span>Plan editor</span><span>Openings</span><span>Procedural furniture</span><span>Live 3D</span></div>
         </div>`,
@@ -1332,7 +1361,7 @@
         overlay.className = 'modal-overlay';
         overlay.innerHTML = `<div class="modal-card ${opts.wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(opts.title)}">
           <div class="modal-head">
-            <div><span class="eyebrow">${esc(opts.eyebrow || 'Floorcraft')}</span><h2>${esc(opts.title)}</h2></div>
+            <div><span class="eyebrow">${esc(opts.eyebrow || 'RoomCraft')}</span><h2>${esc(opts.title)}</h2></div>
             <button class="icon-btn soft modal-x" aria-label="Close">${I('close')}</button>
           </div>
           ${opts.input ? `<label class="modal-input"><span>${esc(opts.inputLabel || 'Name')}</span><input type="text" value="${esc(opts.input)}" maxlength="60"></label>` : ''}

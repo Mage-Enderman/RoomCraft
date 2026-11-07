@@ -1,4 +1,4 @@
-/* Floorcraft — plan model, geometry, room detection and furnishing recipes. */
+/* RoomCraft — plan model, geometry, room detection and furnishing recipes. */
 (function () {
   const FC = (window.FC = window.FC || {});
 
@@ -31,11 +31,15 @@
     bathroom: { label: 'Bathroom', color: '#b7c5ca', ink: '#5b747c', icon: 'window' },
     hallway: { label: 'Hallway', color: '#cbc5bb', ink: '#736e65', icon: 'door' },
     office: { label: 'Office', color: '#c6c0b1', ink: '#6b6658', icon: 'file' },
+    garage: { label: 'Garage', color: '#b2b8bf', ink: '#475569', icon: 'garage' },
+    utility: { label: 'Utility / Laundry', color: '#c2c9d1', ink: '#334155', icon: 'sliders' },
+    patio: { label: 'Patio / Porch', color: '#c4ccb8', ink: '#4d5d40', icon: 'sun' },
     balcony: { label: 'Balcony', color: '#b9c2ac', ink: '#5e6f53', icon: 'sun' },
     storage: { label: 'Storage', color: '#c4beb4', ink: '#6e6960', icon: 'layers' },
+    closet: { label: 'Closet / Walk-in', color: '#c9c3be', ink: '#5c544d', icon: 'layers' },
   };
 
-  FC.roomTypeOrder = ['living', 'bedroom', 'kitchen', 'dining', 'bathroom', 'hallway', 'office', 'balcony', 'storage'];
+  FC.roomTypeOrder = ['living', 'bedroom', 'kitchen', 'dining', 'bathroom', 'hallway', 'office', 'garage', 'utility', 'patio', 'balcony', 'storage', 'closet'];
 
   FC.styles = {
     scandinavian: {
@@ -595,26 +599,252 @@
   /* Room detection (planar face walk)                                  */
   /* ------------------------------------------------------------------ */
 
+  FC.healWallJunctions = function (plan, options) {
+    options = options || {};
+    const walls = plan.walls || [];
+    const outline = plan.outline || [];
+    if (!outline.length && !walls.length) return;
+
+    const s = plan.settings || FC.defaultSettings;
+    const extThick = options.extThickness || s.extThickness || 0.20;
+    const intThick = options.intThickness || s.intThickness || 0.12;
+    // CAD interior walls stop at inside drywall face of exterior walls:
+    // Gap to outer outline is extThick (typically 0.15 - 0.25m).
+    const maxExtGap = options.maxExtGap || Math.max(extThick * 1.6, 0.36);
+    // CAD walls meeting other walls stop at drywall face (gap intThick/2 to intThick):
+    const maxIntGap = options.maxIntGap || Math.max(intThick * 2.2, 0.28);
+    const weldDist = options.weldDist || 0.08;
+
+    const outSegs = [];
+    for (let i = 0; i < outline.length; i++) {
+      outSegs.push({ a: outline[i], b: outline[(i + 1) % outline.length], idx: i });
+    }
+
+    // 1. Ray-extension to outline:
+    // If extending a wall forward along its longitudinal vector intersects an outline segment within maxExtGap,
+    // extend that wall endpoint right to the outline intersection point.
+    walls.forEach((w) => {
+      const dx = w.b.x - w.a.x, dy = w.b.y - w.a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.05) return;
+      const ux = dx / len, uy = dy / len;
+
+      // Forward extension of endpoint b (+u)
+      let bestDistB = Infinity, bestPtB = null;
+      outSegs.forEach((os) => {
+        const sx = os.b.x - os.a.x, sy = os.b.y - os.a.y;
+        const denom = ux * sy - uy * sx;
+        if (Math.abs(denom) > 1e-5) {
+          const t = ((os.a.x - w.b.x) * sy - (os.a.y - w.b.y) * sx) / denom;
+          const sParam = ((os.a.x - w.b.x) * uy - (os.a.y - w.b.y) * ux) / denom;
+          if (t >= -0.01 && t <= maxExtGap && sParam >= -0.01 && sParam <= 1.01) {
+            if (t < bestDistB) {
+              bestDistB = t;
+              bestPtB = { x: w.b.x + ux * t, y: w.b.y + uy * t };
+            }
+          }
+        }
+      });
+      if (bestPtB && bestDistB <= maxExtGap) {
+        w.b.x = FC.round(bestPtB.x, 3);
+        w.b.y = FC.round(bestPtB.y, 3);
+      }
+
+      // Backward extension of endpoint a (-u)
+      let bestDistA = Infinity, bestPtA = null;
+      outSegs.forEach((os) => {
+        const sx = os.b.x - os.a.x, sy = os.b.y - os.a.y;
+        const denom = -ux * sy - (-uy) * sx;
+        if (Math.abs(denom) > 1e-5) {
+          const t = ((os.a.x - w.a.x) * sy - (os.a.y - w.a.y) * sx) / denom;
+          const sParam = ((os.a.x - w.a.x) * (-uy) - (os.a.y - w.a.y) * (-ux)) / denom;
+          if (t >= -0.01 && t <= maxExtGap && sParam >= -0.01 && sParam <= 1.01) {
+            if (t < bestDistA) {
+              bestDistA = t;
+              bestPtA = { x: w.a.x - ux * t, y: w.a.y - uy * t };
+            }
+          }
+        }
+      });
+      if (bestPtA && bestDistA <= maxExtGap) {
+        w.a.x = FC.round(bestPtA.x, 3);
+        w.a.y = FC.round(bestPtA.y, 3);
+      }
+    });
+
+    // 2. Intersection extension between interior walls (T-junctions & L-junctions)
+    for (let round = 0; round < 2; round++) {
+      for (let i = 0; i < walls.length; i++) {
+        const w1 = walls[i];
+        const dx1 = w1.b.x - w1.a.x, dy1 = w1.b.y - w1.a.y;
+        const len1 = Math.hypot(dx1, dy1);
+        if (len1 < 0.05) continue;
+
+        for (let j = 0; j < walls.length; j++) {
+          if (i === j) continue;
+          const w2 = walls[j];
+          const dx2 = w2.b.x - w2.a.x, dy2 = w2.b.y - w2.a.y;
+          const len2 = Math.hypot(dx2, dy2);
+          if (len2 < 0.05) continue;
+
+          const denom = dx1 * dy2 - dy1 * dx2;
+          if (Math.abs(denom) < 1e-5) continue; // parallel
+
+          // Line-line intersection point P
+          const t1 = ((w2.a.x - w1.a.x) * dy2 - (w2.a.y - w1.a.y) * dx2) / denom;
+          const t2 = ((w2.a.x - w1.a.x) * dy1 - (w2.a.y - w1.a.y) * dx1) / denom;
+
+          const px = w1.a.x + dx1 * t1;
+          const py = w1.a.y + dy1 * t1;
+
+          // Check if intersection is close to an endpoint of w1
+          const distToA1 = Math.hypot(px - w1.a.x, py - w1.a.y);
+          const distToB1 = Math.hypot(px - w1.b.x, py - w1.b.y);
+          const isNearEnd1 = (distToA1 <= maxIntGap && t1 <= 0.08) || (distToB1 <= maxIntGap && t1 >= 0.92);
+
+          // Check if P falls on or near w2's segment
+          const isWithinW2 = t2 >= -0.15 && t2 <= 1.15;
+
+          if (isNearEnd1 && isWithinW2) {
+            // L-junction check: is P also near an endpoint of w2?
+            const distToA2 = Math.hypot(px - w2.a.x, py - w2.a.y);
+            const distToB2 = Math.hypot(px - w2.b.x, py - w2.b.y);
+            const isNearEnd2 = distToA2 <= maxIntGap || distToB2 <= maxIntGap;
+
+            if (distToA1 < distToB1) {
+              w1.a.x = FC.round(px, 3);
+              w1.a.y = FC.round(py, 3);
+            } else {
+              w1.b.x = FC.round(px, 3);
+              w1.b.y = FC.round(py, 3);
+            }
+
+            if (isNearEnd2) {
+              if (distToA2 < distToB2) {
+                w2.a.x = FC.round(px, 3);
+                w2.a.y = FC.round(py, 3);
+              } else {
+                w2.b.x = FC.round(px, 3);
+                w2.b.y = FC.round(py, 3);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Perpendicular projection fallback for any endpoints still slightly off outline or other walls
+    walls.forEach((w) => {
+      ['a', 'b'].forEach((k) => {
+        let bestDist = Infinity, bestPt = null;
+        outSegs.forEach((os) => {
+          const h = FC.pointSegment(w[k], os.a, os.b);
+          if (h.dist < bestDist) {
+            bestDist = h.dist;
+            bestPt = h.point;
+          }
+        });
+        if (bestDist > 1e-4 && bestDist <= maxExtGap && bestPt) {
+          w[k].x = FC.round(bestPt.x, 3);
+          w[k].y = FC.round(bestPt.y, 3);
+        }
+      });
+    });
+
+    walls.forEach((w1) => {
+      ['a', 'b'].forEach((k) => {
+        let bestDist = Infinity, bestPt = null;
+        walls.forEach((w2) => {
+          if (w1 === w2) return;
+          const h = FC.pointSegment(w1[k], w2.a, w2.b);
+          if (h.dist < bestDist) {
+            bestDist = h.dist;
+            bestPt = h.point;
+          }
+        });
+        if (bestDist > 1e-4 && bestDist <= maxIntGap && bestPt) {
+          w1[k].x = FC.round(bestPt.x, 3);
+          w1[k].y = FC.round(bestPt.y, 3);
+        }
+      });
+    });
+
+    // 4. Union-Find Cluster Welding: Weld very close endpoints (< weldDist, 0.08m) into unified joints (eliminates double-dots)
+    const pts = [];
+    walls.forEach((w) => { pts.push(w.a); pts.push(w.b); });
+
+    const parent = pts.map((_, idx) => idx);
+    function findRoot(idx) {
+      if (parent[idx] === idx) return idx;
+      return (parent[idx] = findRoot(parent[idx]));
+    }
+    function unionRoots(i1, i2) {
+      const r1 = findRoot(i1);
+      const r2 = findRoot(i2);
+      if (r1 !== r2) parent[r1] = r2;
+    }
+
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        if (Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y) <= weldDist) {
+          unionRoots(i, j);
+        }
+      }
+    }
+
+    const clusters = new Map();
+    for (let i = 0; i < pts.length; i++) {
+      const root = findRoot(i);
+      if (!clusters.has(root)) clusters.set(root, []);
+      clusters.get(root).push(pts[i]);
+    }
+
+    clusters.forEach((members) => {
+      if (members.length <= 1) return;
+      let sumX = 0, sumY = 0;
+      members.forEach((p) => { sumX += p.x; sumY += p.y; });
+      const avgX = FC.round(sumX / members.length, 3);
+      const avgY = FC.round(sumY / members.length, 3);
+      members.forEach((p) => { p.x = avgX; p.y = avgY; });
+    });
+  };
+
+  FC.closeWallGaps = function (plan, maxGap) {
+    FC.healWallJunctions(plan, { maxExtGap: maxGap, maxIntGap: maxGap });
+  };
+
   function buildHalfEdgeGraph(plan) {
-    const base = FC.getSegments(plan).filter((s) => s.len > 0.15);
+    const base = FC.getSegments(plan).filter((s) => s.len > 0.12);
     const cuts = base.map(() => [0, 1]);
 
     for (let i = 0; i < base.length; i++) {
-      for (let j = i + 1; j < base.length; j++) {
-        const hit = FC.segmentIntersection(base[i].a, base[i].b, base[j].a, base[j].b);
-        if (!hit) continue;
-        if (hit.t > 1e-5 && hit.t < 1 - 1e-5) cuts[i].push(hit.t);
-        if (hit.u > 1e-5 && hit.u < 1 - 1e-5) cuts[j].push(hit.u);
+      for (let j = 0; j < base.length; j++) {
+        if (i === j) continue;
+        // T-junction: endpoint of segment j meets interior of segment i
+        ['a', 'b'].forEach((k) => {
+          const pt = base[j][k];
+          const hit = FC.pointSegment(pt, base[i].a, base[i].b);
+          if (hit.dist < 0.04 && hit.t > 0.005 && hit.t < 0.995) {
+            cuts[i].push(hit.t);
+          }
+        });
+        if (j > i) {
+          const hit = FC.segmentIntersection(base[i].a, base[i].b, base[j].a, base[j].b);
+          if (hit) {
+            if (hit.t > 1e-5 && hit.t < 1 - 1e-5) cuts[i].push(hit.t);
+            if (hit.u > 1e-5 && hit.u < 1 - 1e-5) cuts[j].push(hit.u);
+          }
+        }
       }
     }
 
     const nodes = new Map();
     const adjacency = new Map();
-    const keyFor = (x, y) => Math.round(x * 1000) + ',' + Math.round(y * 1000);
+    const keyFor = (x, y) => Math.round(x * 100) + ',' + Math.round(y * 100);
 
     function addNode(x, y) {
       const k = keyFor(x, y);
-      if (!nodes.has(k)) nodes.set(k, { key: k, x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000 });
+      if (!nodes.has(k)) nodes.set(k, { key: k, x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
       return k;
     }
     function addDir(from, to) {
@@ -627,11 +857,11 @@
     }
 
     base.forEach((seg, idx) => {
-      const list = cuts[idx].slice().sort((a, b) => a - b);
+      const list = Array.from(new Set(cuts[idx])).sort((a, b) => a - b);
       for (let k = 0; k < list.length - 1; k++) {
         const t0 = list[k];
         const t1 = list[k + 1];
-        if ((t1 - t0) * seg.len < 0.01) continue;
+        if ((t1 - t0) * seg.len < 0.02) continue;
         const a = FC.lerp(seg.a, seg.b, t0);
         const b = FC.lerp(seg.a, seg.b, t1);
         const u = addNode(a.x, a.y);
@@ -651,6 +881,9 @@
     const outline = plan.outline;
     const outlineArea = Math.abs(FC.polygonArea(outline));
     if (outlineArea < 0.5) return [];
+
+    // Automatically close minor wall gaps before planar graph walk
+    FC.closeWallGaps(plan, 0.22);
 
     const graph = buildHalfEdgeGraph(plan);
     const { nodes, adjacency } = graph;
@@ -681,7 +914,7 @@
         if (cycle.length >= 3) {
           const poly = cycle.map((k) => ({ x: nodes.get(k).x, y: nodes.get(k).y }));
           const area = FC.polygonArea(poly);
-          if (area > 0.6) {
+          if (area > 0.4) {
             const clean = FC.dedupePolygon(poly);
             if (clean.length >= 3) {
               const centroid = FC.polygonCentroid(clean);
@@ -694,23 +927,53 @@
       });
     });
 
-    // Deduplicate identical / near-identical faces (can occur with dangling walls).
+    // Deduplicate identical / near-identical faces
     const unique = [];
     faces.sort((a, b) => b.area - a.area);
     for (const f of faces) {
-      const dup = unique.find((u) => Math.abs(u.area - f.area) < 0.05 && FC.dist(u.centroid, f.centroid) < 0.15);
+      const dup = unique.find((u) => Math.abs(u.area - f.area) < 0.1 && FC.dist(u.centroid, f.centroid) < 0.25);
       if (!dup) unique.push(f);
     }
 
-    unique.forEach((r, i) => {
-      r.id = 'room_' + i + '_' + Math.round(r.centroid.x * 10) + '_' + Math.round(r.centroid.y * 10);
-      r.bounds = FC.polygonBounds(r.polygon);
-      r.type = null;
-      r.name = '';
+    // Merge in any manually defined rooms from plan.manualRooms
+    if (Array.isArray(plan.manualRooms)) {
+      plan.manualRooms.forEach((mr) => {
+        if (!mr || !mr.polygon || mr.polygon.length < 3) return;
+        const clean = FC.dedupePolygon(mr.polygon);
+        const area = mr.area || Math.abs(FC.polygonArea(clean));
+        const centroid = mr.centroid || FC.polygonCentroid(clean);
+        unique.push({
+          id: mr.id || FC.uid('room_manual'),
+          name: mr.name || 'Custom Room',
+          type: mr.type || 'living',
+          polygon: clean,
+          area,
+          centroid,
+          bounds: mr.bounds || FC.polygonBounds(clean),
+          isManual: true,
+        });
+      });
+    }
+
+    // Filter out ignored rooms if user removed them
+    const ignored = new Set(plan.ignoredRooms || []);
+    const filtered = unique.filter((r) => !ignored.has(r.id));
+
+    filtered.forEach((r, i) => {
+      if (!r.id) {
+        r.id = 'room_' + i + '_' + Math.round(r.centroid.x * 10) + '_' + Math.round(r.centroid.y * 10);
+      }
+      if (!r.bounds) {
+        r.bounds = FC.polygonBounds(r.polygon);
+      }
+      if (!r.isManual) {
+        r.type = null;
+        r.name = '';
+      }
     });
 
-    assignRoomMeta(plan, unique);
-    return unique.sort((a, b) => b.area - a.area);
+    assignRoomMeta(plan, filtered);
+    return filtered.sort((a, b) => b.area - a.area);
   };
 
   function matchPreviousRoom(room, prev) {
@@ -781,6 +1044,8 @@
       } else if (!used.kitchen && r.area > 6) {
         r.type = 'kitchen';
         used.kitchen = 1;
+      } else if (r.area <= 4.5) {
+        r.type = 'closet';
       } else {
         r.type = 'storage';
       }
@@ -797,6 +1062,8 @@
       if (!r.name) {
         if (r.type === 'bedroom' && counts.bedroom > 1) r.name = 'Bedroom ' + idx.bedroom;
         else if (r.type === 'bathroom' && counts.bathroom > 1) r.name = 'Bathroom ' + idx.bathroom;
+        else if (r.type === 'closet') r.name = r.area > 2.2 ? 'Walk-in Closet' : (counts.closet > 1 ? 'Closet ' + idx.closet : 'Closet');
+        else if (r.type === 'storage' && counts.storage > 1) r.name = 'Storage ' + idx.storage;
         else r.name = type.label;
       }
     });
@@ -1112,6 +1379,13 @@
         add(room, 'shelf', cx, y0 + 0.22, Math.max(1.0, W - 0.5), 0.4, 0, { mat: 'metal' });
         add(room, 'boxes', x0 + 0.5, y1 - 0.45, 0.55, 0.55, 0, { mat: 'wood', decor: true });
         add(room, 'boxes', x0 + 1.15, y1 - 0.4, 0.45, 0.45, 0.2, { mat: 'wood', decor: true });
+      } else if (type === 'closet') {
+        add(room, 'wardrobe', cx, y0 + 0.28, Math.max(0.9, W - 0.3), 0.5, 0, { mat: 'cabinet' });
+        add(room, 'shelf', cx, y0 + 0.18, Math.max(0.8, W - 0.4), 0.32, 0, { mat: 'wood', elev: 1.8, h: 0.05, decor: true });
+        add(room, 'boxes', x0 + 0.4, y1 - 0.35, 0.4, 0.4, 0, { mat: 'wood', decor: true });
+        if (W > 1.8 && D > 1.5) {
+          add(room, 'shelf', x1 - 0.2, cy, Math.min(1.1, D - 0.5), 0.32, Math.PI / 2, { mat: 'wood' });
+        }
       } else {
         // Living room variations
         const wide = W > 7.2 && D > 3.0;
@@ -1202,6 +1476,7 @@
     if (op.kind === 'opening') return 'Open passage';
     if (op.style === 'double') return 'Double door';
     if (op.style === 'sliding') return 'Sliding door';
+    if (op.style === 'bifold') return 'Bifold door';
     return 'Door';
   };
 
@@ -1365,6 +1640,9 @@
           break;
         }
       }
+    }
+    if (count > 0 && FC.healWallJunctions) {
+      FC.healWallJunctions(plan);
     }
     return count;
   };

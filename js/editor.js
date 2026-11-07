@@ -1,4 +1,4 @@
-/* Floorcraft — 2D plan editor */
+/* RoomCraft — 2D plan editor */
 (function () {
   const FC = (window.FC = window.FC || {});
   const TAU = Math.PI * 2;
@@ -391,13 +391,23 @@
         if (tool === 'outline' && this.app.plan.outline.length >= 3) {
           this.finishOutline();
           e.preventDefault();
-        } else if (tool === 'wall' && this.wallChain) {
+        } else if ((tool === 'wall' || tool === 'divider') && this.wallChain) {
           this.endWallChain();
+          e.preventDefault();
+        } else if (tool === 'room' && this.roomChain && this.roomChain.length >= 3) {
+          this.app.addManualRoom(this.roomChain);
+          this.roomChain = null;
+          this.app.setTool('select');
+          this.draw();
           e.preventDefault();
         }
       } else if (e.key === 'Escape') {
         if (this.wallChain) {
           this.endWallChain();
+          e.preventDefault();
+        } else if (tool === 'room' && this.roomChain) {
+          this.roomChain = null;
+          this.draw();
           e.preventDefault();
         } else if (tool === 'outline' && this.app.ui.drawingFresh && this.app.plan.outline.length) {
           this.cancelOutline();
@@ -411,7 +421,10 @@
 
     drawingStart() {
       const tool = this.app.ui.tool;
-      if (tool === 'wall' && this.wallChain) return this.wallChain;
+      if ((tool === 'wall' || tool === 'divider') && this.wallChain) return this.wallChain;
+      if (tool === 'room' && this.roomChain && this.roomChain.length) {
+        return this.roomChain[this.roomChain.length - 1];
+      }
       if (tool === 'outline' && this.app.ui.drawingFresh && this.app.plan.outline.length) {
         return this.app.plan.outline[this.app.plan.outline.length - 1];
       }
@@ -454,10 +467,11 @@
         return;
       }
 
-      if (tool === 'wall') {
+      if (tool === 'wall' || tool === 'divider') {
         const snap = this.snapPoint(w, this.wallChain, { chainFirst: this.chainFirst, ortho: this.app.ui.ortho });
+        const isDiv = tool === 'divider';
         if (snap.type === 'close' && this.wallChain && this.chainFirst) {
-          this.addWall(this.wallChain, this.chainFirst);
+          this.addWall(this.wallChain, this.chainFirst, isDiv);
           this.endWallChain();
           return;
         }
@@ -469,7 +483,7 @@
           return;
         }
         if (FC.dist(this.wallChain, snap.point) > 0.12) {
-          this.addWall(this.wallChain, snap.point);
+          this.addWall(this.wallChain, snap.point, isDiv);
           this.wallChain = { x: snap.point.x, y: snap.point.y };
         }
         this.snap = snap;
@@ -483,13 +497,36 @@
       }
 
       if (tool === 'room') {
+        if (this.roomChain) {
+          const first = this.roomChain[0];
+          const last = this.roomChain[this.roomChain.length - 1];
+          const snap = this.snapPoint(w, last, { ortho: this.app.ui.ortho });
+          if (this.roomChain.length >= 3 && (snap.type === 'close' || FC.dist(snap.point, first) < this.screenTol(16))) {
+            this.app.addManualRoom(this.roomChain);
+            this.roomChain = null;
+            this.app.setTool('select');
+            this.draw();
+            return;
+          }
+          if (FC.dist(last, snap.point) > 0.12) {
+            this.roomChain.push({ x: snap.point.x, y: snap.point.y });
+          }
+          this.snap = snap;
+          this.draw();
+          return;
+        }
+
         const room = this.hitRoom(w);
         if (room) {
           this.app.select({ type: 'room', id: room.id });
           this.app.ui.openRoomSelection(room.id);
-        } else {
-          this.app.clearSelection();
+          return;
         }
+
+        const snap = this.snapPoint(w, null, { ortho: this.app.ui.ortho });
+        this.roomChain = [{ x: snap.point.x, y: snap.point.y }];
+        this.snap = snap;
+        this.draw();
         return;
       }
 
@@ -560,6 +597,10 @@
           this.drag = { type: 'wall', key: hit.seg.key, seg: hit.seg, startW: { x: w.x, y: w.y }, moved: false, pushed: false };
           return;
         }
+        if (hit.type === 'room') {
+          this.app.select({ type: 'room', id: hit.room.id });
+          return;
+        }
       }
       this.app.clearSelection();
       this.drag = { type: 'pan', sx: this.pointer.sx, sy: this.pointer.sy, cx: this.view.cx, cy: this.view.cy };
@@ -594,7 +635,7 @@
       this.draw();
     }
 
-    addWall(a, b) {
+    addWall(a, b, virtual) {
       if (FC.dist(a, b) < 0.15) return;
       const plan = this.app.plan;
       const dup = plan.walls.some((w) => {
@@ -603,11 +644,13 @@
       });
       if (dup) return;
       this.app.pushHistory();
-      plan.walls.push({
+      const wallObj = {
         id: FC.uid('w'),
         a: { x: FC.round(a.x, 3), y: FC.round(a.y, 3) },
         b: { x: FC.round(b.x, 3), y: FC.round(b.y, 3) },
-      });
+      };
+      if (virtual || this.app.ui.tool === 'divider') wallObj.virtual = true;
+      plan.walls.push(wallObj);
       this.app.changed({ rooms: true, furniture: true, save: false });
       this.app.ui.updateHint();
     }
@@ -696,11 +739,11 @@
       }
 
       const tool = this.app.ui.tool;
-      if (tool === 'outline' || tool === 'wall') {
+      if (tool === 'outline' || tool === 'wall' || tool === 'divider' || tool === 'room') {
         const from = this.drawingStart();
         const snap = this.snapPoint(w, from, {
           outline: tool === 'outline' && this.app.ui.drawingFresh,
-          chainFirst: tool === 'wall' ? this.chainFirst : null,
+          chainFirst: (tool === 'wall' || tool === 'divider') ? this.chainFirst : null,
           ortho: this.app.ui.ortho,
         });
         this.snap = snap;
@@ -1042,8 +1085,7 @@
       let c = 'default';
       if (this.drag && this.drag.type === 'pan') c = 'grabbing';
       else if (this.spaceDown || tool === 'pan') c = 'grab';
-      else if (tool === 'outline' || tool === 'wall' || tool === 'door' || tool === 'window' || tool === 'opening') c = 'crosshair';
-      else if (tool === 'room') c = this.hover ? 'pointer' : 'default';
+      else if (tool === 'outline' || tool === 'wall' || tool === 'divider' || tool === 'room' || tool === 'door' || tool === 'window' || tool === 'opening') c = 'crosshair';
       else if (this.hover) c = 'pointer';
       this.canvas.style.cursor = c;
     }
@@ -1210,6 +1252,10 @@
             label: 'Sliding door',
             action: () => this.app.setDoorStyle('sliding'),
           });
+          items.push({
+            label: 'Bifold door',
+            action: () => this.app.setDoorStyle('bifold'),
+          });
         }
       } else if (hit && hit.type === 'furniture') {
         const f = hit.furniture;
@@ -1325,7 +1371,15 @@
           if (!bestWall || hit.dist < bestWall.dist) bestWall = { type: 'wall', seg, dist: hit.dist, offset: hit.t * seg.len };
         }
       }
-      return bestWall;
+      if (bestWall) return bestWall;
+
+      const rooms = this.app.rooms || [];
+      for (const room of rooms) {
+        if (room.polygon && room.polygon.length >= 3 && FC.pointInPolygon(w, room.polygon)) {
+          return { type: 'room', room, id: room.id };
+        }
+      }
+      return null;
     }
 
     /* ---------------------------------------------------------------- */
@@ -1463,6 +1517,7 @@
       // soft under-shadow
       ctx.strokeStyle = 'rgba(28,28,34,0.10)';
       segs.forEach((seg) => {
+        if (seg.wall && seg.wall.virtual) return;
         const a = this.w2s(seg.a);
         const b = this.w2s(seg.b);
         ctx.lineWidth = seg.thickness * this.view.scale + 3;
@@ -1474,6 +1529,18 @@
       segs.forEach((seg) => {
         const a = this.w2s(seg.a);
         const b = this.w2s(seg.b);
+        if (seg.wall && seg.wall.virtual) {
+          ctx.save();
+          ctx.setLineDash([7, 5]);
+          ctx.strokeStyle = '#6366f1';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.restore();
+          return;
+        }
         ctx.lineWidth = seg.thickness * this.view.scale;
         ctx.strokeStyle = seg.boundary ? '#26262b' : '#37373d';
         ctx.beginPath();
@@ -1484,6 +1551,7 @@
       // rounded joints
       const joints = new Map();
       segs.forEach((seg) => {
+        if (seg.wall && seg.wall.virtual) return;
         [seg.a, seg.b].forEach((p) => {
           const k = Math.round(p.x * 1000) + ',' + Math.round(p.y * 1000);
           const cur = joints.get(k);
@@ -1650,6 +1718,25 @@
         ctx.beginPath();
         ctx.moveTo(s.x - dir.x * half * 0.05, s.y - dir.y * half * 0.05 - gap);
         ctx.lineTo(s.x + dir.x * half, s.y + dir.y * half - gap);
+        ctx.stroke();
+        ctx.restore();
+        return;
+      }
+
+      if (pl.op.style === 'bifold') {
+        const quarter = half / 2;
+        const foldDepth = Math.min(quarter * 0.75, 12);
+        ctx.strokeStyle = active ? ACCENT : '#2b2a30';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.moveTo(s.x - dir.x * half, s.y - dir.y * half);
+        ctx.lineTo(s.x - dir.x * quarter - n.x * foldDepth, s.y - dir.y * quarter - n.y * foldDepth);
+        ctx.lineTo(s.x, s.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(s.x + dir.x * quarter - n.x * foldDepth, s.y + dir.y * quarter - n.y * foldDepth);
+        ctx.lineTo(s.x + dir.x * half, s.y + dir.y * half);
         ctx.stroke();
         ctx.restore();
         return;
@@ -2047,12 +2134,12 @@
         ctx.restore();
       }
 
-      if (tool === 'wall' && this.wallChain) {
+      if ((tool === 'wall' || tool === 'divider') && this.wallChain) {
         const start = this.w2s(this.wallChain);
         if (this.snap) {
           const end = this.w2s(this.snap.point);
           ctx.save();
-          ctx.strokeStyle = accent;
+          ctx.strokeStyle = tool === 'divider' ? '#6366f1' : accent;
           ctx.lineWidth = 2;
           ctx.setLineDash([7, 5]);
           ctx.beginPath();
@@ -2064,6 +2151,28 @@
           this.handleDot(start, true);
           ctx.restore();
         }
+      }
+
+      if (tool === 'room' && this.roomChain && this.roomChain.length) {
+        ctx.save();
+        ctx.beginPath();
+        this.roomChain.forEach((pt, i) => {
+          const s = this.w2s(pt);
+          if (i === 0) ctx.moveTo(s.x, s.y);
+          else ctx.lineTo(s.x, s.y);
+        });
+        if (this.snap) {
+          const sEnd = this.w2s(this.snap.point);
+          ctx.lineTo(sEnd.x, sEnd.y);
+        }
+        ctx.fillStyle = 'rgba(99, 102, 241, 0.16)';
+        ctx.fill();
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        this.roomChain.forEach((pt) => this.handleDot(this.w2s(pt), false));
+        ctx.restore();
       }
 
       if ((tool === 'door' || tool === 'window' || tool === 'opening') && this.hoverOpeningWall) {

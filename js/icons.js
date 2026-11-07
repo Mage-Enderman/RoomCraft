@@ -1,4 +1,4 @@
-/* Floorcraft — inline icon set (stroke icons, 24x24) */
+/* RoomCraft — inline icon set (stroke icons, 24x24) */
 (function () {
   const FC = (window.FC = window.FC || {});
 
@@ -53,6 +53,9 @@
     rotate3d: '<path d="M4 8.2c2.8-3.2 7-4.3 10.7-2.9 3.7 1.4 6 4.9 5.7 8.8"/><path d="M20.4 9.8l-.5 4.3-4.2-.7"/><path d="M20 15.8c-2.8 3.2-7 4.3-10.7 2.9-3.7-1.4-6-4.9-5.7-8.8"/><path d="M3.6 14.2l.5-4.3 4.2.7"/>',
     sofa: '<path d="M5 12V8.4A2.4 2.4 0 0 1 7.4 6h9.2A2.4 2.4 0 0 1 19 8.4V12"/><path d="M3.8 12a2 2 0 0 1 2 2v1.8h12.4V14a2 2 0 1 1 2 0v3.4a1.6 1.6 0 0 1-1.6 1.6H5.4a1.6 1.6 0 0 1-1.6-1.6V14a2 2 0 0 1 2-2z"/>',
     bed: '<path d="M3.4 19v-9.2M3.4 15h17.2v4M20.6 19v-5a3 3 0 0 0-3-3H9.4v4"/><path d="M3.4 12.4h6V9h11.2a3 3 0 0 1 3 3v1.4"/><circle cx="7.2" cy="8.2" r="1.3"/>',
+    garage: '<path d="M4 19V7l8-4 8 4v12"/><path d="M7 19v-7h10v7"/><path d="M7 15h10M7 12h10"/>',
+    magic: '<path d="M19 11l-4-4L3 19l4 4L19 11zM14 2l1.5 3.5L19 7l-3.5 1.5L14 12l-1.5-3.5L9 7l3.5-1.5L14 2z"/>',
+    divider: '<path d="M4 12h3M10.5 12h3M17 12h3M12 4v3M12 17v3"/>',
   };
 
   FC.icon = function (name, cls) {

@@ -1,4 +1,4 @@
-/* Floorcraft — procedural low-poly furniture for the 3D view. */
+/* RoomCraft — procedural low-poly furniture for the 3D view. */
 (function () {
   const FC = (window.FC = window.FC || {});
   if (!window.THREE) return;

@@ -1,4 +1,4 @@
-/* Floorcraft — CAD (DWG/DXF) export and import bridge.
+/* RoomCraft — CAD (DWG/DXF) export and import bridge.
  * Generates and parses standard AutoCAD-compliant DXF interchange format,
  * fully compatible with AutoCAD, CadCraft, LibreCAD, Revit, and SketchUp.
  */
@@ -307,12 +307,29 @@
         for (let j = 0; j < xs.length; j++) pts.push({ x: xs[j], y: ys[j] });
       } else if (e.type === 'INSERT') {
         const name = (e.props[2] && e.props[2][0]) || '';
-        if (/door/i.test(name)) doorCount++;
-        if (/window/i.test(name)) windowCount++;
+        const layer = (e.props[8] && e.props[8][0]) || '';
+        if (/door/i.test(name) || /door/i.test(layer)) doorCount++;
+        if (/window|glaz/i.test(name) || /window|glaz/i.test(layer)) windowCount++;
         const x = parseFloat(e.props[10] ? e.props[10][0] : 0);
         const y = parseFloat(e.props[20] ? e.props[20][0] : 0);
         pts.push({ x, y, isInsert: true });
       }
+    });
+
+    const layerMap = new Map();
+    entities.forEach((e) => {
+      const l = (e.props[8] && e.props[8][0]) || '0';
+      if (!layerMap.has(l)) layerMap.set(l, { name: l, count: 0, types: new Set() });
+      const rec = layerMap.get(l);
+      rec.count++;
+      rec.types.add(e.type);
+    });
+    const layers = Array.from(layerMap.values()).map((l) => {
+      let role = 'walls';
+      if (/win|glaz|fenster/i.test(l.name)) role = 'windows';
+      else if (/door|tuer|porte/i.test(l.name)) role = 'doors';
+      else if (/outer|exterior|perimeter|boundary|facade/i.test(l.name)) role = 'outline';
+      return { name: l.name, count: l.count, role, types: Array.from(l.types) };
     });
 
     if (!pts.length) {
@@ -369,6 +386,7 @@
       doorCount,
       windowCount,
       outliersFiltered: pts.length - cleanPts.length,
+      layers,
     };
   };
 
@@ -498,11 +516,20 @@
       validInserts = cadInserts.filter((ins) => !isOutlier(ins));
     }
 
-    // Convert extracted CAD entities into a new Floorcraft Plan
+    // Convert extracted CAD entities into a new RoomCraft Plan
     const plan = FC.createPlan(options.filename || 'Imported CAD Floorplan');
 
     // 1. Identify outer boundary & concentric outer wall shells
-    const closedPolys = validPolys.filter((p) => p.closed && p.pts.length >= 3);
+    function isPolyLoop(p) {
+      if (!p || !p.pts || p.pts.length < 3) return false;
+      if (p.closed) return true;
+      const d = Math.hypot(p.pts[0].x - p.pts[p.pts.length - 1].x, p.pts[0].y - p.pts[p.pts.length - 1].y);
+      if (d < 2.5) return true;
+      if (/outer|exterior|perimeter|boundary|facade/i.test(p.layer) && d < 4.5) return true;
+      return false;
+    }
+
+    const closedPolys = validPolys.filter(isPolyLoop);
     closedPolys.sort((p1, p2) => Math.abs(FC.polygonArea(p2.pts)) - Math.abs(FC.polygonArea(p1.pts)));
 
     let bestOutline = null;
@@ -520,12 +547,13 @@
         if (closedPolys.length >= 2) {
           const p2 = closedPolys[1];
           const area2 = Math.abs(FC.polygonArea(p2.pts));
-          if (area2 > area1 * 0.65 && p2.pts.length === p1.pts.length) {
+          if (area2 > area1 * 0.65) {
             let distSum = 0;
-            for (let k = 0; k < p1.pts.length; k++) {
+            const checkCount = Math.min(p1.pts.length, p2.pts.length);
+            for (let k = 0; k < checkCount; k++) {
               distSum += Math.hypot(p1.pts[k].x - p2.pts[k].x, p1.pts[k].y - p2.pts[k].y);
             }
-            const avgDist = distSum / p1.pts.length;
+            const avgDist = distSum / checkCount;
             if (avgDist > 0.05 && avgDist < 0.6) {
               extThickness = FC.round(avgDist, 3);
               excludedPolys.add(p2); // Exclude duplicate inner shell from interior walls
@@ -534,6 +562,8 @@
         }
       }
     }
+    // Exclude any remaining outer wall polyline from interior walls
+    validPolys.filter((p) => /outer|exterior|perimeter/i.test(p.layer)).forEach((p) => excludedPolys.add(p));
 
     if (bestOutline) {
       plan.outline = bestOutline.map((p) => ({ x: FC.round(p.x, 3), y: FC.round(p.y, 3) }));
@@ -541,10 +571,17 @@
     }
 
     // 2. Interior Walls
+    const isWinLayer = (l) => /win|glaz|fenster/i.test(l || '');
+    const isDoorLayer = (l) => /door|tuer|porte/i.test(l || '');
+
     const allSegs = [];
-    validLines.forEach((l) => allSegs.push({ a: l.a, b: l.b }));
+    validLines.forEach((l) => {
+      if (!isWinLayer(l.layer) && !isDoorLayer(l.layer)) {
+        allSegs.push({ a: l.a, b: l.b });
+      }
+    });
     validPolys.forEach((poly) => {
-      if (!excludedPolys.has(poly)) {
+      if (!excludedPolys.has(poly) && !isWinLayer(poly.layer) && !isDoorLayer(poly.layer)) {
         for (let j = 0; j < poly.pts.length - (poly.closed ? 0 : 1); j++) {
           const a = poly.pts[j];
           const b = poly.pts[(j + 1) % poly.pts.length];
@@ -666,23 +703,37 @@
       });
     }
 
-    // 4. Doors & Windows from INSERT blocks
-    if (importDoors && validInserts.length) {
+    // 4. Doors & Windows from CAD INSERTS and Layer Lines
+    if (importDoors) {
+      const bOutline = FC.polygonBounds(plan.outline);
+      const bMargin = 2.5;
+      const inBuildingBounds = (p) =>
+        p.x >= bOutline.x0 - bMargin &&
+        p.x <= bOutline.x1 + bMargin &&
+        p.y >= bOutline.y0 - bMargin &&
+        p.y <= bOutline.y1 + bMargin;
+
+      const inBoundsInserts = validInserts.filter(inBuildingBounds);
       const segs = FC.getSegments(plan);
-      validInserts.forEach((ins) => {
-        const isDoor = /door/i.test(ins.blockName);
-        const isWindow = /window/i.test(ins.blockName);
+
+      inBoundsInserts.forEach((ins) => {
+        const isSliding = /sliding|pocket|bypass/i.test(ins.blockName) || /sliding|pocket|bypass/i.test(ins.layer);
+        const isBifold = /bifold|folding/i.test(ins.blockName) || /bifold|folding/i.test(ins.layer);
+        const isDouble = /double/i.test(ins.blockName);
+        const isDoor = isSliding || isBifold || isDouble || /door/i.test(ins.blockName) || isDoorLayer(ins.layer);
+        const isWindow = /window|win|glaz/i.test(ins.blockName) || isWinLayer(ins.layer);
         if (!isDoor && !isWindow) return;
 
-        let w = isDoor ? plan.settings.doorWidth || 0.9 : plan.settings.windowWidth || 1.2;
-        if (/3FT/i.test(ins.blockName)) w = 0.914;
+        let w = isDoor ? (plan.settings.doorWidth || 0.9) : (plan.settings.windowWidth || 1.2);
+        if (/6FT/i.test(ins.blockName)) w = 1.829;
+        else if (/5FT/i.test(ins.blockName)) w = 1.524;
+        else if (/4FT/i.test(ins.blockName)) w = 1.219;
+        else if (/3FT/i.test(ins.blockName)) w = 0.914;
         else if (/2FT8/i.test(ins.blockName)) w = 0.813;
         else if (/2FT6/i.test(ins.blockName)) w = 0.762;
-        else if (/4FT/i.test(ins.blockName)) w = 1.219;
-        else if (/5FT/i.test(ins.blockName)) w = 1.524;
-        else if (/6FT/i.test(ins.blockName)) w = 1.829;
+        else if (/2FT/i.test(ins.blockName)) w = 0.610;
+        else if (/1FT/i.test(ins.blockName)) w = 0.305;
 
-        // Find nearest segment
         let bestSeg = null;
         let bestDist = Infinity;
         let bestOffset = 0;
@@ -704,22 +755,109 @@
           }
         });
 
-        if (bestSeg && bestDist < 1.2) {
+        if (bestSeg && bestDist < 1.4) {
           plan.openings.push({
             id: FC.uid('op'),
             kind: isDoor ? 'door' : 'window',
-            style: isDoor ? 'single' : 'standard',
+            style: isDoor ? (isSliding ? 'sliding' : (isBifold ? 'bifold' : (isDouble ? 'double' : 'single'))) : 'standard',
             hostKey: bestSeg.key,
             offset: FC.round(bestOffset, 3),
             width: FC.round(w, 3),
-            height: isDoor ? plan.settings.doorHeight || 2.1 : plan.settings.windowHeight || 1.2,
-            sill: isDoor ? 0 : plan.settings.windowSill || 0.9,
+            height: isDoor ? (plan.settings.doorHeight || 2.1) : (plan.settings.windowHeight || 1.2),
+            sill: isDoor ? 0 : (plan.settings.windowSill || 0.9),
           });
+        }
+      });
+
+      // Detect bifold door lines on Doors layer (e.g. closet opening header and triangles)
+      const doorLineCandidates = validLines.filter((l) => isDoorLayer(l.layer) && inBuildingBounds(l.a) && inBuildingBounds(l.b));
+      doorLineCandidates.forEach((dl) => {
+        const len = Math.hypot(dl.b.x - dl.a.x, dl.b.y - dl.a.y);
+        if (len >= 1.1 && len <= 2.4) {
+          const midX = (dl.a.x + dl.b.x) / 2;
+          const midY = (dl.a.y + dl.b.y) / 2;
+          let bestSeg = null, bestDist = Infinity, bestOffset = 0;
+          segs.forEach((s) => {
+            const dx = s.b.x - s.a.x, dy = s.b.y - s.a.y;
+            const t = ((midX - s.a.x) * dx + (midY - s.a.y) * dy) / (s.len * s.len);
+            if (t >= -0.05 && t <= 1.05) {
+              const px = s.a.x + Math.max(0, Math.min(1, t)) * dx;
+              const py = s.a.y + Math.max(0, Math.min(1, t)) * dy;
+              const d = Math.hypot(midX - px, midY - py);
+              if (d < bestDist) {
+                bestDist = d;
+                bestSeg = s;
+                bestOffset = Math.max(len / 2 + 0.05, Math.min(s.len - len / 2 - 0.05, t * s.len));
+              }
+            }
+          });
+          if (bestSeg && bestDist < 0.6) {
+            const dup = plan.openings.find((o) => o.hostKey === bestSeg.key && Math.abs(o.offset - bestOffset) < 0.5);
+            if (!dup) {
+              plan.openings.push({
+                id: FC.uid('op'),
+                kind: 'door',
+                style: 'bifold',
+                hostKey: bestSeg.key,
+                offset: FC.round(bestOffset, 3),
+                width: FC.round(len, 3),
+                height: plan.settings.doorHeight || 2.1,
+                sill: 0,
+              });
+            }
+          }
+        }
+      });
+
+      // Convert window drafting lines on Windows layer into window openings
+      const winLineCandidates = validLines.filter((l) => isWinLayer(l.layer) && inBuildingBounds(l.a) && inBuildingBounds(l.b));
+      winLineCandidates.forEach((wl) => {
+        const len = Math.hypot(wl.b.x - wl.a.x, wl.b.y - wl.a.y);
+        if (len >= 0.55 && len <= 3.2) {
+          const midX = (wl.a.x + wl.b.x) / 2;
+          const midY = (wl.a.y + wl.b.y) / 2;
+          let bestSeg = null, bestDist = Infinity, bestOffset = 0;
+          segs.forEach((s) => {
+            const dx = s.b.x - s.a.x, dy = s.b.y - s.a.y;
+            const t = ((midX - s.a.x) * dx + (midY - s.a.y) * dy) / (s.len * s.len);
+            if (t >= -0.05 && t <= 1.05) {
+              const px = s.a.x + Math.max(0, Math.min(1, t)) * dx;
+              const py = s.a.y + Math.max(0, Math.min(1, t)) * dy;
+              const d = Math.hypot(midX - px, midY - py);
+              if (d < bestDist) {
+                bestDist = d;
+                bestSeg = s;
+                bestOffset = Math.max(len / 2 + 0.05, Math.min(s.len - len / 2 - 0.05, t * s.len));
+              }
+            }
+          });
+          if (bestSeg && bestDist < 0.5) {
+            const dup = plan.openings.find((o) => o.hostKey === bestSeg.key && Math.abs(o.offset - bestOffset) < 0.4);
+            if (!dup) {
+              plan.openings.push({
+                id: FC.uid('op'),
+                kind: 'window',
+                style: 'standard',
+                hostKey: bestSeg.key,
+                offset: FC.round(bestOffset, 3),
+                width: FC.round(len, 3),
+                height: plan.settings.windowHeight || 1.2,
+                sill: plan.settings.windowSill || 0.9,
+              });
+            }
+          }
         }
       });
     }
 
-    // 5. Normalize coordinates so min coordinates are nicely centered near origin
+    // 5. Heal wall junctions (CAD double line gaps, exterior wall thickness offset, double dots)
+    if (FC.healWallJunctions) {
+      FC.healWallJunctions(plan);
+    } else if (FC.closeWallGaps) {
+      FC.closeWallGaps(plan, 0.28);
+    }
+
+    // 6. Normalize coordinates so min coordinates are nicely centered near origin
     const b = FC.planBounds(plan);
     const shiftX = -b.x0 + 1.0;
     const shiftY = -b.y0 + 1.0;
@@ -729,6 +867,15 @@
       w.a.x = FC.round(w.a.x + shiftX, 3); w.a.y = FC.round(w.a.y + shiftY, 3);
       w.b.x = FC.round(w.b.x + shiftX, 3); w.b.y = FC.round(w.b.y + shiftY, 3);
     });
+
+    if (FC.ensureOpeningHosts) {
+      FC.ensureOpeningHosts(plan);
+    }
+
+    // 7. Auto-detect rooms now that walls and outline are cleanly sealed
+    if (FC.detectRooms) {
+      plan.rooms = FC.detectRooms(plan);
+    }
 
     return plan;
   };

@@ -1,10 +1,12 @@
-/* Floorcraft — application controller, persistence and shortcuts */
+/* RoomCraft — application controller, persistence and shortcuts */
 (function () {
   const FC = (window.FC = window.FC || {});
   if (!FC) return;
 
-  const STORAGE_KEY = 'floorcraft.projects.v1';
-  const CURRENT_KEY = 'floorcraft.current.v1';
+  const STORAGE_KEY = 'roomcraft.projects.v1';
+  const CURRENT_KEY = 'roomcraft.current.v1';
+  const LEGACY_STORAGE_KEY = 'floorcraft.projects.v1';
+  const LEGACY_CURRENT_KEY = 'floorcraft.current.v1';
   const MAX_HISTORY = 70;
   const TOOL_STEP = {
     outline: 1,
@@ -122,7 +124,8 @@
     _loadProjects() {
       let stored = [];
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        let raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) raw = localStorage.getItem(LEGACY_STORAGE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) stored = parsed;
@@ -143,7 +146,7 @@
 
       let currentId = null;
       try {
-        currentId = localStorage.getItem(CURRENT_KEY);
+        currentId = localStorage.getItem(CURRENT_KEY) || localStorage.getItem(LEGACY_CURRENT_KEY);
       } catch (err) {
         currentId = null;
       }
@@ -493,6 +496,77 @@
       if (this.viewer) this.viewer.markDirty();
     }
 
+    setRoomName(roomId, name) {
+      const room = (this.rooms || []).find((r) => r.id === roomId);
+      if (!room) return;
+      room.name = name;
+      const meta = (this.plan.rooms || []).find((m) => m.id === roomId);
+      if (meta) meta.name = name;
+      if (room.isManual && this.plan.manualRooms) {
+        const mr = this.plan.manualRooms.find((m) => m.id === roomId);
+        if (mr) mr.name = name;
+      }
+      this.changed({ save: true });
+      if (this.editor) this.editor.draw();
+      if (this.ui) this.ui.renderStep();
+    }
+
+    deleteRoom(roomId) {
+      const room = (this.rooms || []).find((r) => r.id === roomId);
+      if (!room) return;
+      this.pushHistory();
+      this.plan.ignoredRooms = this.plan.ignoredRooms || [];
+      if (!this.plan.ignoredRooms.includes(roomId)) {
+        this.plan.ignoredRooms.push(roomId);
+      }
+      if (room.isManual && this.plan.manualRooms) {
+        this.plan.manualRooms = this.plan.manualRooms.filter((r) => r.id !== roomId);
+      }
+      this.rooms = FC.detectRooms(this.plan);
+      this.plan.rooms = this._roomMeta();
+      if (this.plan.furnished) this.recomputeFurniture();
+      this.clearSelection();
+      this.changed({ save: true });
+      this.ui.renderAll();
+      this.toast('Room removed', 'info');
+    }
+
+    addManualRoom(poly, name, type) {
+      if (!poly || poly.length < 3) return;
+      this.pushHistory();
+      this.plan.manualRooms = this.plan.manualRooms || [];
+      const clean = FC.dedupePolygon(poly);
+      const area = Math.abs(FC.polygonArea(clean));
+      const centroid = FC.polygonCentroid(clean);
+      const bounds = FC.polygonBounds(clean);
+      const id = FC.uid('room_manual');
+      const t = type || 'living';
+      const rName = name || (FC.roomTypes[t] ? FC.roomTypes[t].label : 'Custom Room');
+      const newRoom = { id, name: rName, type: t, polygon: clean, area, centroid, bounds, isManual: true };
+      this.plan.manualRooms.push(newRoom);
+      this.rooms = FC.detectRooms(this.plan);
+      this.plan.rooms = this._roomMeta();
+      if (this.plan.furnished) this.recomputeFurniture();
+      this.select({ type: 'room', id });
+      this.changed({ save: true });
+      this.ui.renderAll();
+      this.toast('Added "' + rName + '" (' + area.toFixed(1) + ' m²)', 'success');
+    }
+
+    toggleWallVirtual(wallId) {
+      const wall = (this.plan.walls || []).find((w) => w.id === wallId);
+      if (!wall) return;
+      this.pushHistory();
+      wall.virtual = !wall.virtual;
+      this.rooms = FC.detectRooms(this.plan);
+      this.plan.rooms = this._roomMeta();
+      if (this.plan.furnished) this.recomputeFurniture();
+      this.changed({ save: true });
+      this.ui.renderAll();
+      if (this.viewer) this.viewer.markDirty();
+      this.toast(wall.virtual ? 'Converted to Room Divider (virtual wall)' : 'Converted to Solid Wall', 'success');
+    }
+
     deleteSelection() {
       const sel = this.ui.selection;
       if (!sel) return;
@@ -541,7 +615,7 @@
       if (!sel || sel.type !== 'opening') return;
       const op = this.plan.openings.find((o) => o.id === sel.id);
       if (!op || op.kind !== 'door') return;
-      if (!['single', 'double', 'sliding'].includes(style)) return;
+      if (!['single', 'double', 'sliding', 'bifold'].includes(style)) return;
       this.pushHistory();
       op.style = style;
       this.changed({ furniture: false, save: true });
@@ -798,7 +872,7 @@
       if (!op) return;
       this.pushHistory();
       if (op.kind === 'door') {
-        const styles = ['single', 'double', 'sliding'];
+        const styles = ['single', 'double', 'sliding', 'bifold'];
         const nextIdx = (styles.indexOf(op.style || 'single') + 1) % styles.length;
         op.style = styles[nextIdx];
       }
@@ -1179,7 +1253,7 @@
 
     exportJSON() {
       const data = JSON.stringify(this.plan, null, 2);
-      downloadBlob(new Blob([data], { type: 'application/json' }), safeName(this.plan.name) + '.floorcraft.json');
+      downloadBlob(new Blob([data], { type: 'application/json' }), safeName(this.plan.name) + '.roomcraft.json');
       this.toast('Plan exported as JSON', 'success');
     }
 
@@ -1260,9 +1334,18 @@
       const html = `
         <div style="font-size:13px;color:var(--ink-2);margin-bottom:14px;line-height:1.5;">
           <b>${filename}</b> · ${analysis.entityCount} entities
-          ${analysis.doorCount ? ` · <span style="color:var(--brand-primary);">${analysis.doorCount} doors detected</span>` : ''}
-          ${analysis.outliersFiltered ? ` · <span style="color:#d97706;">1 outlier scrap entity filtered</span>` : ''}
+          ${analysis.doorCount ? ` · <span style="color:var(--brand-primary);">${analysis.doorCount} doors</span>` : ''}
+          ${analysis.windowCount ? ` · <span style="color:#0284c7;">${analysis.windowCount} windows</span>` : ''}
+          ${analysis.outliersFiltered ? ` · <span style="color:#d97706;">${analysis.outliersFiltered} rogue entities ignored</span>` : ''}
         </div>
+        ${analysis.layers && analysis.layers.length ? `
+        <div style="background:var(--surface-sunken);border:1px solid var(--border-soft);border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12px;">
+          <span style="font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-3);display:block;margin-bottom:6px;">Detected CAD Layers & Roles</span>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            ${analysis.layers.map(l => `<span style="background:var(--surface-card);border:1px solid var(--border-soft);padding:2px 8px;border-radius:6px;font-size:11px;"><b>${l.name}</b> (${l.count}) · <span style="color:var(--brand-primary);font-weight:500;">${l.role}</span></span>`).join('')}
+          </div>
+        </div>
+        ` : ''}
         <div style="background:var(--surface-sunken);border:1px solid var(--border-soft);border-radius:10px;padding:12px;margin-bottom:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <span style="font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-3);">Drawing scale / units</span>
@@ -1496,14 +1579,14 @@
               if (!hasGeometry) throw new Error('No floor plan geometry found');
               const plan = FC.normalizePlan(candidate);
               plan.id = FC.uid('plan');
-              plan.name = plan.name || file.name.replace(/\.(floorcraft\.)?json$/i, '') || 'Imported plan';
+              plan.name = plan.name || file.name.replace(/\.(roomcraft\.|floorcraft\.)?json$/i, '') || 'Imported plan';
               plan.createdAt = Date.now();
               plan.updatedAt = Date.now();
               this.projects.push(plan);
               this._activatePlan(plan);
               this.toast('Imported "' + plan.name + '"', 'success');
             } catch (err) {
-              this.toast('Could not import that file — expected a Floorcraft JSON plan.', 'error');
+              this.toast('Could not import that file — expected a RoomCraft JSON plan.', 'error');
             }
           };
           reader.onerror = () => this.toast('Could not read that file.', 'error');
@@ -1726,7 +1809,7 @@
 
     toast(message, type) {
       if (this.ui && this.ui.toast) this.ui.toast(message, type);
-      else if (window.console) console.log('[Floorcraft]', message);
+      else if (window.console) console.log('[RoomCraft]', message);
     }
   }
 
@@ -1740,11 +1823,11 @@
     if (FC.app) return;
     try {
       FC.app = new FC.App();
-      window.floorcraft = FC.app;
+      window.roomcraft = window.floorcraft = FC.app;
     } catch (err) {
-      console.error('Floorcraft failed to start', err);
+      console.error('RoomCraft failed to start', err);
       const hint = document.getElementById('statusHint');
-      if (hint) hint.textContent = 'Floorcraft could not start — check the browser console.';
+      if (hint) hint.textContent = 'RoomCraft could not start — check the browser console.';
     }
   }
 

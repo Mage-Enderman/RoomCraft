@@ -1,4 +1,4 @@
-/* Floorcraft — Three.js dollhouse viewer */
+/* RoomCraft — Three.js dollhouse viewer */
 (function () {
   const FC = (window.FC = window.FC || {});
   if (!window.THREE) return;
@@ -330,7 +330,7 @@
       this.wallMats = [wallMat, wallOutMat, capMat];
 
       segs.forEach((seg) => {
-        if (seg.len < 0.1) return;
+        if (seg.len < 0.1 || (seg.wall && seg.wall.virtual)) return;
         const L = seg.len;
         const t = seg.thickness;
         const ops = [];
@@ -477,6 +477,57 @@
           box(panelW, panelH, 0.035, cx + w / 4, panelH / 2 + 0.01, 0.025, mat);
           box(0.018, 0.4, 0.02, cx - 0.06, 1.05, 0.055, trimMat);
           box(0.018, 0.4, 0.02, cx + 0.06, 1.05, -0.055, trimMat);
+        } else if (pl.op.style === 'bifold') {
+          // Double bifold closet door: 4 folding leaves
+          const leafW = (w - 0.08) / 4;
+          const leafH = h - 0.06;
+          const fold = 0.72;
+
+          box(w, 0.035, 0.035, cx, h - 0.02, 0, trimMat);
+
+          const gL1 = new THREE.Group();
+          gL1.position.set(cx - w / 2 + 0.04, 0, 0);
+          gL1.rotation.y = fold;
+          const mL1 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
+          mL1.position.set(leafW / 2, leafH / 2 + 0.02, 0);
+          mL1.castShadow = true;
+          gL1.add(mL1);
+
+          const gL2 = new THREE.Group();
+          gL2.position.set(leafW, 0, 0);
+          gL2.rotation.y = -fold * 2;
+          const mL2 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
+          mL2.position.set(leafW / 2, leafH / 2 + 0.02, 0);
+          mL2.castShadow = true;
+          gL2.add(mL2);
+
+          const handleL = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.16, 8), trimMat);
+          handleL.position.set(leafW - 0.04, 1.05, 0.028);
+          gL2.add(handleL);
+          gL1.add(gL2);
+          group.add(gL1);
+
+          const gR1 = new THREE.Group();
+          gR1.position.set(cx + w / 2 - 0.04, 0, 0);
+          gR1.rotation.y = -fold;
+          const mR1 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
+          mR1.position.set(-leafW / 2, leafH / 2 + 0.02, 0);
+          mR1.castShadow = true;
+          gR1.add(mR1);
+
+          const gR2 = new THREE.Group();
+          gR2.position.set(-leafW, 0, 0);
+          gR2.rotation.y = fold * 2;
+          const mR2 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
+          mR2.position.set(-leafW / 2, leafH / 2 + 0.02, 0);
+          mR2.castShadow = true;
+          gR2.add(mR2);
+
+          const handleR = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.16, 8), trimMat);
+          handleR.position.set(-leafW + 0.04, 1.05, 0.028);
+          gR2.add(handleR);
+          gR1.add(gR2);
+          group.add(gR1);
         } else {
           const leaves = pl.op.style === 'double' ? 2 : 1;
           const leafW = (w - 0.08) / leaves;
