@@ -1971,25 +1971,71 @@
   };
 
   FC.isNonSolid = function (item) {
-    return (
-      item.kind === 'rug' ||
-      item.kind === 'bathMat' ||
-      item.kind === 'pendant' ||
-      item.kind === 'artwork' ||
-      item.kind === 'mirrorCabinet' ||
-      item.kind === 'towelRack' ||
-      item.kind === 'rangeHood' ||
-      item.kind === 'fullMirror'
-    );
+    if (!item) return false;
+    return item.kind === 'rug' || item.kind === 'bathMat' || item.kind === 'pendant';
   };
 
   FC.itemsOverlap = function (itemA, itemB, margin) {
-    if (FC.isNonSolid(itemA) || FC.isNonSolid(itemB)) return false;
-    const elevA = itemA.elev || 0;
-    const elevB = itemB.elev || 0;
-    const hA = itemA.h || 0.6;
-    const hB = itemB.h || 0.6;
-    if (elevA + hA <= elevB + 0.05 || elevB + hB <= elevA + 0.05) return false;
+    if (!itemA || !itemB) return false;
+
+    // Floor coverings (rugs, bath mats): other furniture stands on top of them
+    const isFloorCoveringA = itemA.kind === 'rug' || itemA.kind === 'bathMat';
+    const isFloorCoveringB = itemB.kind === 'rug' || itemB.kind === 'bathMat';
+    if (isFloorCoveringA || isFloorCoveringB) {
+      if (itemA.kind === itemB.kind) {
+        const cornersA = FC.itemCorners(itemA, margin || 0.02);
+        const cornersB = FC.itemCorners(itemB, margin || 0.02);
+        return FC.polygonsIntersect(cornersA, cornersB);
+      }
+      return false;
+    }
+
+    // Ceiling fixtures (pendants) hang from ceiling and don't collide with floor/wall items
+    if (itemA.kind === 'pendant' || itemB.kind === 'pendant') {
+      if (itemA.kind === itemB.kind) {
+        return Math.hypot(itemA.x - itemB.x, itemA.y - itemB.y) < ((itemA.w + itemB.w) / 2);
+      }
+      return false;
+    }
+
+    // Look up elevations and heights if not explicitly provided
+    const ruleA = (FC.ITEM_RULES && FC.ITEM_RULES[itemA.kind]) || {};
+    const ruleB = (FC.ITEM_RULES && FC.ITEM_RULES[itemB.kind]) || {};
+    const defA = (FC.furnitureCatalog && FC.furnitureCatalog[itemA.kind]) || {};
+    const defB = (FC.furnitureCatalog && FC.furnitureCatalog[itemB.kind]) || {};
+
+    const elevA = itemA.elev != null ? itemA.elev : (ruleA.elev != null ? ruleA.elev : (defA.elev != null ? defA.elev : 0));
+    const elevB = itemB.elev != null ? itemB.elev : (ruleB.elev != null ? ruleB.elev : (defB.elev != null ? defB.elev : 0));
+    const hA = itemA.h != null ? itemA.h : (defA.h != null ? defA.h : (FC.FURNITURE_HEIGHTS && FC.FURNITURE_HEIGHTS[itemA.kind]) || 0.6);
+    const hB = itemB.h != null ? itemB.h : (defB.h != null ? defB.h : (FC.FURNITURE_HEIGHTS && FC.FURNITURE_HEIGHTS[itemB.kind]) || 0.6);
+
+    // Wall accessories (artwork, fullMirror, mirrorCabinet, towelRack):
+    // They share wall space and must NEVER overlap each other on the wall
+    const isWallDecorA = itemA.kind === 'artwork' || itemA.kind === 'fullMirror' || itemA.kind === 'mirrorCabinet' || itemA.kind === 'towelRack';
+    const isWallDecorB = itemB.kind === 'artwork' || itemB.kind === 'fullMirror' || itemB.kind === 'mirrorCabinet' || itemB.kind === 'towelRack';
+    if (isWallDecorA && isWallDecorB) {
+      const cornersA = FC.itemCorners(itemA, margin || 0.08);
+      const cornersB = FC.itemCorners(itemB, margin || 0.08);
+      return FC.polygonsIntersect(cornersA, cornersB);
+    }
+
+    // Full mirror is a full-height mirror extending to near floor level:
+    // It must NEVER overlap floor furniture (bed, sofa, desk, wardrobe, etc.)
+    if (
+      (itemA.kind === 'fullMirror' && (itemB.kind === 'bed' || itemB.kind === 'singleBed' || itemB.kind === 'crib')) ||
+      (itemB.kind === 'fullMirror' && (itemA.kind === 'bed' || itemA.kind === 'singleBed' || itemA.kind === 'crib'))
+    ) {
+      const cornersA = FC.itemCorners(itemA, margin || 0.15);
+      const cornersB = FC.itemCorners(itemB, margin || 0.15);
+      return FC.polygonsIntersect(cornersA, cornersB);
+    }
+
+    // Vertical bounding box clearance check
+    if (elevA + hA <= elevB + 0.04 || elevB + hB <= elevA + 0.04) {
+      return false;
+    }
+
+    // Allowed paired / tucked items
     if (
       (itemA.kind === 'chair' && (itemB.kind === 'diningTable' || itemB.kind === 'desk')) ||
       (itemB.kind === 'chair' && (itemA.kind === 'diningTable' || itemA.kind === 'desk')) ||
@@ -2000,6 +2046,7 @@
     ) {
       return false;
     }
+
     const cornersA = FC.itemCorners(itemA, margin || 0.02);
     const cornersB = FC.itemCorners(itemB, margin || 0.02);
     return FC.polygonsIntersect(cornersA, cornersB);
@@ -2259,6 +2306,9 @@
         const off = offsets[o];
         const cx = w.mid.x + uX * off + w.nx * (itemD / 2 + 0.04);
         const cy = w.mid.y + uY * off + w.ny * (itemD / 2 + 0.04);
+        const def = (FC.furnitureCatalog && FC.furnitureCatalog[itemKind]) || {};
+        const elev = rule.elev != null ? rule.elev : (def.elev != null ? def.elev : 0);
+        const h = def.h || (FC.FURNITURE_HEIGHTS && FC.FURNITURE_HEIGHTS[itemKind]) || 0.6;
         const item = {
           kind: itemKind,
           x: FC.round(cx, 3),
@@ -2266,6 +2316,8 @@
           w: FC.round(itemW, 3),
           d: FC.round(itemD, 3),
           rot: FC.round(w.rot, 3),
+          elev,
+          h,
           nx: w.nx,
           ny: w.ny,
           wall: w,
