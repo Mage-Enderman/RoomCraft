@@ -1226,15 +1226,250 @@
             return;
           }
           const text = await file.text();
-          const importedPlan = FC.CAD.importDXF(text, { filename: file.name.replace(/\.[^/.]+$/, '') });
-          this._activatePlan(importedPlan);
-          this.toast('CAD floorplan imported successfully!', 'success');
+          const analysis = FC.CAD && FC.CAD.analyzeDXF ? FC.CAD.analyzeDXF(text) : null;
+          if (analysis) {
+            this.openCADImportModal(text, file.name, analysis);
+          } else {
+            const importedPlan = FC.CAD.importDXF(text, { filename: file.name.replace(/\.[^/.]+$/, '') });
+            this._activatePlan(importedPlan);
+            if (this.editor) this.editor.fit();
+            this.toast('CAD floorplan imported successfully!', 'success');
+          }
         } catch (err) {
           console.error(err);
           this.toast('Could not import CAD file: ' + err.message, 'error');
         }
       };
       input.click();
+    }
+
+    openCADImportModal(text, filename, analysis) {
+      const cleanName = filename.replace(/\.[^/.]+$/, '');
+      const rawW = analysis.rawW;
+      const rawH = analysis.rawH;
+      const recommendedUnit = analysis.unit;
+
+      const units = [
+        { id: 'in', label: 'Inches (in)', factor: 0.0254, w: (rawW * 0.0254).toFixed(1), h: (rawH * 0.0254).toFixed(1) },
+        { id: 'mm', label: 'Millimeters (mm)', factor: 0.001, w: (rawW * 0.001).toFixed(2), h: (rawH * 0.001).toFixed(2) },
+        { id: 'cm', label: 'Centimeters (cm)', factor: 0.01, w: (rawW * 0.01).toFixed(1), h: (rawH * 0.01).toFixed(1) },
+        { id: 'm', label: 'Meters (m)', factor: 1.0, w: rawW.toFixed(1), h: rawH.toFixed(1) },
+        { id: 'ft', label: 'Feet (ft)', factor: 0.3048, w: (rawW * 0.3048).toFixed(1), h: (rawH * 0.3048).toFixed(1) },
+      ];
+
+      const html = `
+        <div style="font-size:13px;color:var(--ink-2);margin-bottom:14px;line-height:1.5;">
+          <b>${filename}</b> · ${analysis.entityCount} entities
+          ${analysis.doorCount ? ` · <span style="color:var(--brand-primary);">${analysis.doorCount} doors detected</span>` : ''}
+          ${analysis.outliersFiltered ? ` · <span style="color:#d97706;">1 outlier scrap entity filtered</span>` : ''}
+        </div>
+        <div style="background:var(--surface-sunken);border:1px solid var(--border-soft);border-radius:10px;padding:12px;margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-3);">Drawing scale / units</span>
+            <span id="cadResultDims" style="font-size:12px;font-weight:600;color:var(--brand-primary);">${analysis.scaledW} m × ${analysis.scaledH} m</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr;gap:6px;">
+            ${units.map((u) => `
+              <label style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--surface-card);border:1px solid var(--border-soft);border-radius:8px;cursor:pointer;">
+                <span style="display:flex;align-items:center;gap:8px;">
+                  <input type="radio" name="cadUnit" value="${u.factor}" ${u.id === recommendedUnit ? 'checked' : ''}>
+                  <b>${u.label}</b>
+                  ${u.id === recommendedUnit ? `<span class="badge" style="background:var(--brand-primary);color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;">Recommended</span>` : ''}
+                </span>
+                <span style="color:var(--ink-3);font-size:12px;">${u.w} m × ${u.h} m</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+            <input type="checkbox" id="cadMergeDouble" checked>
+            <span><b>Auto-merge double-line walls</b> (consolidate CAD 2-line walls into single walls with thickness)</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+            <input type="checkbox" id="cadImportDoors" checked>
+            <span><b>Import door and window blocks</b> as interactive openings</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+            <input type="checkbox" id="cadFilterOutliers" checked>
+            <span><b>Ignore scrap entities</b> located far outside the floorplan bounds</span>
+          </label>
+        </div>
+      `;
+
+      this.ui.showModal({
+        title: 'Import CAD Drawing',
+        eyebrow: 'AutoCAD DXF / DWG',
+        wide: true,
+        html,
+        actions: [
+          { label: 'Cancel', value: null },
+          { label: 'Import Plan', primary: true, value: 'import' },
+        ],
+        onMount: (overlay) => {
+          const dimsSpan = overlay.querySelector('#cadResultDims');
+          overlay.querySelectorAll('input[name="cadUnit"]').forEach((radio) => {
+            radio.addEventListener('change', () => {
+              const factor = parseFloat(radio.value);
+              dimsSpan.textContent = (rawW * factor).toFixed(2) + ' m × ' + (rawH * factor).toFixed(2) + ' m';
+            });
+          });
+        },
+      }).then((result) => {
+        if (!result) return;
+        const selRadio = document.querySelector('input[name="cadUnit"]:checked');
+        const factor = selRadio ? parseFloat(selRadio.value) : (analysis.unitFactor || 0.0254);
+        const mergeDouble = document.getElementById('cadMergeDouble') ? document.getElementById('cadMergeDouble').checked : true;
+        const importDoors = document.getElementById('cadImportDoors') ? document.getElementById('cadImportDoors').checked : true;
+        const filterOutliers = document.getElementById('cadFilterOutliers') ? document.getElementById('cadFilterOutliers').checked : true;
+
+        try {
+          const importedPlan = FC.CAD.importDXF(text, {
+            filename: cleanName,
+            scale: factor,
+            mergeDoubleLines: mergeDouble,
+            importDoors: importDoors,
+            filterOutliers: filterOutliers,
+          });
+          this._activatePlan(importedPlan);
+          if (this.editor) this.editor.fit();
+          this.toast('CAD floorplan imported successfully! (' + (importedPlan.walls.length + (importedPlan.outline ? 1 : 0)) + ' walls)', 'success');
+        } catch (err) {
+          console.error(err);
+          this.toast('Could not import CAD file: ' + err.message, 'error');
+        }
+      });
+    }
+
+    scalePlan(factor) {
+      if (!factor || factor <= 0 || !isFinite(factor) || factor === 1) return;
+      this.pushHistory();
+      FC.scalePlan(this.plan, factor);
+      this._syncPlan();
+      this.rooms = FC.detectRooms(this.plan);
+      this.plan.rooms = this._roomMeta();
+      if (this.plan.furnished) this.furniture = FC.furnishPlan(this.plan, this.rooms);
+      if (this.editor) this.editor.fit();
+      this.ui.renderAll();
+      this.toast('Plan scaled by ' + factor + 'x', 'success');
+    }
+
+    openScaleModal() {
+      const b = FC.planBounds(this.plan);
+      const curW = b ? b.w : 10;
+      const curH = b ? b.d : 10;
+
+      const html = `
+        <div style="font-size:13px;color:var(--ink-2);margin-bottom:14px;line-height:1.5;">
+          Current plan dimensions: <b style="color:var(--ink-1);">${curW.toFixed(2)} m wide × ${curH.toFixed(2)} m deep</b>
+        </div>
+        <div style="background:var(--surface-sunken);border:1px solid var(--border-soft);border-radius:10px;padding:12px;margin-bottom:14px;">
+          <div style="font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-3);margin-bottom:8px;">Quick Unit Conversions</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <button class="btn soft sm" data-scale-btn="0.0254">Inches → Meters (×0.0254)</button>
+            <button class="btn soft sm" data-scale-btn="0.001">Millimeters → Meters (×0.001)</button>
+            <button class="btn soft sm" data-scale-btn="0.3048">Feet → Meters (×0.3048)</button>
+            <button class="btn soft sm" data-scale-btn="3.28084">Meters → Feet (×3.28)</button>
+            <button class="btn soft sm" data-scale-btn="2">Double size (2×)</button>
+            <button class="btn soft sm" data-scale-btn="0.5">Half size (0.5×)</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <label class="modal-input" style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-weight:600;font-size:12px;color:var(--ink-2);">Or specify Target Width (meters):</span>
+            <input type="number" id="targetWidthInput" step="0.1" min="0.5" max="1000" placeholder="e.g. 21.18" style="padding:8px 10px;background:var(--surface-card);border:1px solid var(--border-soft);border-radius:8px;color:var(--ink-1);">
+          </label>
+          <label class="modal-input" style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-weight:600;font-size:12px;color:var(--ink-2);">Or Custom Scale Factor multiplier:</span>
+            <input type="number" id="customScaleInput" step="0.001" min="0.0001" max="1000" value="1.0" style="padding:8px 10px;background:var(--surface-card);border:1px solid var(--border-soft);border-radius:8px;color:var(--ink-1);">
+          </label>
+        </div>
+      `;
+
+      this.ui.showModal({
+        title: 'Scale / Resize Floorplan',
+        eyebrow: 'Dimensions & Calibration',
+        wide: true,
+        html,
+        actions: [
+          { label: 'Cancel', value: null },
+          { label: 'Apply Scale', primary: true, value: 'apply' },
+        ],
+        onMount: (overlay, close) => {
+          const targetInput = overlay.querySelector('#targetWidthInput');
+          const customInput = overlay.querySelector('#customScaleInput');
+
+          overlay.querySelectorAll('[data-scale-btn]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const factor = parseFloat(btn.dataset.scaleBtn);
+              close({ factor });
+            });
+          });
+
+          targetInput.addEventListener('input', () => {
+            const tw = parseFloat(targetInput.value);
+            if (tw > 0 && curW > 0) {
+              customInput.value = (tw / curW).toFixed(4);
+            }
+          });
+        },
+      }).then((res) => {
+        if (!res) return;
+        let factor = 1;
+        if (typeof res === 'object' && res.factor) {
+          factor = res.factor;
+        } else {
+          const customInput = document.getElementById('customScaleInput');
+          factor = customInput ? parseFloat(customInput.value) : 1;
+        }
+        if (factor && factor > 0 && factor !== 1) {
+          this.scalePlan(factor);
+        }
+      });
+    }
+
+    mergeSelectedWallWithParallel(targetWallId) {
+      const sel = this.ui.selection;
+      if (!sel || sel.type !== 'wall') return;
+      const wallId = sel.key ? (sel.key.startsWith('w:') ? sel.key.slice(2) : null) : sel.id;
+      if (!wallId) return;
+
+      const cand = targetWallId ? { wall: { id: targetWallId } } : FC.findParallelWall(this.plan, wallId);
+      if (!cand) {
+        this.toast('No parallel wall nearby to merge with.', 'warning');
+        return;
+      }
+
+      this.pushHistory();
+      const res = FC.mergeParallelWalls(this.plan, wallId, cand.wall.id);
+      if (!res) {
+        this.toast('Could not merge walls.', 'error');
+        return;
+      }
+
+      this._syncPlan();
+      this.rooms = FC.detectRooms(this.plan);
+      this.plan.rooms = this._roomMeta();
+      if (this.plan.furnished) this.furniture = FC.furnishPlan(this.plan, this.rooms);
+      this.select({ type: 'wall', key: 'w:' + res.mergedWall.id });
+      this.ui.renderAll();
+      this.toast('Merged 2 parallel lines into 1 wall (' + Math.round(res.thickness * 100) + ' cm thick)', 'success');
+    }
+
+    consolidateDoubleWalls() {
+      this.pushHistory();
+      const count = FC.consolidateAllDoubleWalls(this.plan);
+      if (count === 0) {
+        this.toast('No double-line walls found to merge.', 'info');
+        return;
+      }
+      this._syncPlan();
+      this.rooms = FC.detectRooms(this.plan);
+      this.plan.rooms = this._roomMeta();
+      if (this.plan.furnished) this.furniture = FC.furnishPlan(this.plan, this.rooms);
+      this.clearSelection();
+      this.ui.renderAll();
+      this.toast('Merged ' + count + ' double-line wall pairs into single walls!', 'success');
     }
 
     importJSON() {

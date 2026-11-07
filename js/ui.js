@@ -448,6 +448,7 @@
         const seg = FC.getSegments(plan).find((s) => s.key === sel.key);
         if (!seg) return '';
         const angle = Math.round(((seg.angle * 180) / Math.PI + 360) % 360);
+        const parallelCandidate = !seg.boundary && seg.id && FC.findParallelWall ? FC.findParallelWall(plan, seg.id) : null;
         return `<div class="sel-card">
           <div class="sel-head">
             <div><span class="eyebrow">Selected</span><div class="sel-title">${seg.boundary ? 'Exterior wall' : 'Interior wall'}</div></div>
@@ -458,6 +459,15 @@
             <div><b>${Math.round(seg.thickness * 100)}</b><span>thickness · cm</span></div>
             <div><b>${angle}°</b><span>bearing</span></div>
           </div>
+          ${parallelCandidate ? `<div class="tip" style="margin-top:8px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.28);border-radius:8px;padding:8px 10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <div>
+                <b style="color:var(--ink-1);display:block;font-size:12px;">Parallel line detected</b>
+                <span style="font-size:11px;color:var(--ink-3);">${parallelCandidate.thicknessCm} cm separation (double wall)</span>
+              </div>
+              <button class="btn primary sm" data-action="merge-parallel-wall" data-wall="${seg.id}" data-target="${parallelCandidate.wall.id}">Merge into 1</button>
+            </div>
+          </div>` : ''}
           <div class="field" style="margin-top:10px;">
             <label class="num-field"><span>Resize length</span><span class="num-wrap"><input type="number" data-wall-len="${seg.id}" min="0.5" max="30" step="0.05" value="${FC.fmt(seg.len, 2)}"><em>m</em></span></label>
           </div>
@@ -633,6 +643,13 @@
           <div><b>${walls}</b><span>walls</span></div>
         </div>
         <div class="hint-note">${I('info')} Walls snap to outline corners and to each other, so rooms close cleanly.</div>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-soft);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span class="micro-label" style="margin:0;">Double-line walls</span>
+            <button class="btn soft sm" data-action="consolidate-double-walls" title="Merge all double-line CAD walls into single walls with thickness">${I('sliders')} Auto-merge</button>
+          </div>
+          <p class="helper tight">Convert imported parallel CAD lines into single centerline walls with thickness.</p>
+        </div>
       </section>`;
     }
 
@@ -1074,6 +1091,12 @@
         case 'wall-split':
           app.splitWallAt(el.dataset.wall);
           break;
+        case 'merge-parallel-wall':
+          app.mergeSelectedWallWithParallel(el.dataset.target);
+          break;
+        case 'consolidate-double-walls':
+          app.consolidateDoubleWalls();
+          break;
         case 'flip-door':
           app.flipDoor();
           break;
@@ -1222,6 +1245,7 @@
       items.push({ label: 'Rename plan', icon: 'pencil', action: () => this.renamePlan() });
       items.push({ label: 'Duplicate plan', icon: 'copy', action: () => app.duplicateProject() });
       items.push({ label: 'New plan', icon: 'plus', shortcut: 'Ctrl N', action: () => app.newProject() });
+      items.push({ label: 'Scale / Resize plan…', icon: 'ruler', action: () => app.openScaleModal() });
       items.push({ separator: true });
       items.push({ label: 'Import plan…', icon: 'upload', action: () => app.importJSON() });
       items.push({ label: 'Export plan', icon: 'download', action: () => app.exportJSON() });
@@ -1239,6 +1263,7 @@
         [
           { label: 'Fit plan to screen', icon: 'expand', shortcut: 'F', action: () => app.fit(1) },
           { label: 'Toggle dimensions', icon: 'ruler', action: () => app.toggleDimensions() },
+          { label: 'Scale / Resize plan…', icon: 'sliders', action: () => app.openScaleModal() },
           { separator: true },
           { label: 'Export 3D Model (.glb)', icon: 'download', action: () => app.exportGLB() },
           { label: 'Export CAD (.dwg / .dxf)', icon: 'download', action: () => app.exportDWG() },
@@ -1321,6 +1346,13 @@
         root.appendChild(overlay);
         document.body.classList.add('has-overlay');
         this._modal = overlay;
+        if (typeof opts.onMount === 'function') {
+          try {
+            opts.onMount(overlay, (v) => close(v));
+          } catch (e) {
+            console.error('Modal onMount error:', e);
+          }
+        }
         const input = overlay.querySelector('input[type="text"]');
         if (input) {
           setTimeout(() => {

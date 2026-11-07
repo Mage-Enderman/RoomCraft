@@ -76,7 +76,7 @@
       const bw = Math.max(b.w, 2);
       const bd = Math.max(b.d, 2);
       let scale = Math.min(availW / bw, availH / bd, 150);
-      scale = Math.max(18, scale);
+      scale = Math.max(0.01, scale);
       this.view.scale = scale;
       const targetX = (this.W - sidebar) / 2;
       const targetY = padTop + availH / 2;
@@ -89,7 +89,7 @@
     zoomBy(factor, anchor) {
       const a = anchor || { x: this.W / 2, y: this.H / 2 };
       const before = this.s2w(a.x, a.y);
-      this.view.scale = FC.clamp(this.view.scale * factor, 10, 700);
+      this.view.scale = FC.clamp(this.view.scale * factor, 0.01, 1500);
       const after = this.s2w(a.x, a.y);
       this.view.cx += before.x - after.x;
       this.view.cy += before.y - after.y;
@@ -98,13 +98,16 @@
     }
 
     setZoom(percent) {
-      const target = FC.clamp(percent / 100 * 80, 10, 700);
+      const target = FC.clamp((percent / 100) * 80, 0.01, 1500);
       this.zoomBy(target / this.view.scale);
     }
 
     updateZoomLabel() {
       const el = document.getElementById('zoomValue');
-      if (el) el.textContent = Math.round((this.view.scale / 80) * 100) + '%';
+      if (el) {
+        const pct = (this.view.scale / 80) * 100;
+        el.textContent = pct < 10 ? pct.toFixed(1) + '%' : Math.round(pct) + '%';
+      }
     }
 
     centerOn(x, y) {
@@ -130,9 +133,9 @@
     }
 
     gridStep() {
-      const c = [0.25, 0.5, 1, 2, 5, 10, 20];
+      const c = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
       for (const s of c) if (s * this.view.scale >= 15) return s;
-      return 20;
+      return 1000;
     }
 
     screenTol(px) {
@@ -1250,6 +1253,15 @@
           action: () => this.app.placeOpeningAt(seg.key, hit.offset || seg.len / 2),
         });
         if (!seg.boundary) {
+          const cand = seg.id && FC.findParallelWall ? FC.findParallelWall(this.app.plan, seg.id) : null;
+          if (cand) {
+            items.push({ separator: true });
+            items.push({
+              label: `Merge with parallel wall (${cand.thicknessCm} cm)`,
+              icon: 'sliders',
+              action: () => this.app.mergeSelectedWallWithParallel(cand.wall.id),
+            });
+          }
           items.push({ separator: true });
           items.push({
             label: 'Split wall here',

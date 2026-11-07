@@ -1204,4 +1204,168 @@
     if (op.style === 'sliding') return 'Sliding door';
     return 'Door';
   };
+
+  /* ------------------------------------------------------------------ */
+  /* Scaling and CAD consolidation                                       */
+  /* ------------------------------------------------------------------ */
+
+  FC.scalePlan = function (plan, factor) {
+    if (!plan || !factor || factor === 1 || !isFinite(factor) || factor <= 0) return plan;
+    if (plan.outline) {
+      plan.outline.forEach((p) => {
+        p.x = FC.round(p.x * factor, 4);
+        p.y = FC.round(p.y * factor, 4);
+      });
+    }
+    if (plan.walls) {
+      plan.walls.forEach((w) => {
+        w.a.x = FC.round(w.a.x * factor, 4);
+        w.a.y = FC.round(w.a.y * factor, 4);
+        w.b.x = FC.round(w.b.x * factor, 4);
+        w.b.y = FC.round(w.b.y * factor, 4);
+      });
+    }
+    if (plan.openings) {
+      plan.openings.forEach((op) => {
+        op.offset = FC.round(op.offset * factor, 4);
+        op.width = FC.round(op.width * factor, 4);
+      });
+    }
+    if (plan.lights) {
+      plan.lights.forEach((l) => {
+        l.x = FC.round(l.x * factor, 4);
+        l.y = FC.round(l.y * factor, 4);
+        if (l.range) l.range = FC.round(l.range * factor, 2);
+      });
+    }
+    if (plan.furnitureOverrides) {
+      Object.keys(plan.furnitureOverrides).forEach((k) => {
+        const f = plan.furnitureOverrides[k];
+        if (f && f.x != null) f.x = FC.round(f.x * factor, 4);
+        if (f && f.y != null) f.y = FC.round(f.y * factor, 4);
+      });
+    }
+    return plan;
+  };
+
+  FC.findParallelWall = function (plan, wallId, maxDist) {
+    maxDist = maxDist || 0.65;
+    const walls = plan.walls || [];
+    const w1 = walls.find((w) => w.id === wallId);
+    if (!w1) return null;
+
+    const dx1 = w1.b.x - w1.a.x;
+    const dy1 = w1.b.y - w1.a.y;
+    const len1 = Math.hypot(dx1, dy1);
+    if (len1 < 1e-4) return null;
+    const angle1 = Math.atan2(dy1, dx1);
+
+    let best = null;
+    let minPerp = Infinity;
+
+    walls.forEach((w2) => {
+      if (w2.id === wallId) return;
+      const dx2 = w2.b.x - w2.a.x;
+      const dy2 = w2.b.y - w2.a.y;
+      const len2 = Math.hypot(dx2, dy2);
+      if (len2 < 1e-4) return;
+      const angle2 = Math.atan2(dy2, dx2);
+
+      let diff = Math.abs(angle1 - angle2);
+      while (diff > Math.PI) diff -= Math.PI;
+      if (diff > Math.PI / 2) diff = Math.PI - diff;
+
+      // Must be roughly parallel within ~8.5 degrees
+      if (diff > 0.15) return;
+
+      const mid2 = { x: (w2.a.x + w2.b.x) / 2, y: (w2.a.y + w2.b.y) / 2 };
+      const perpDist = Math.abs((mid2.x - w1.a.x) * dy1 - (mid2.y - w1.a.y) * dx1) / len1;
+
+      if (perpDist < 0.02 || perpDist > maxDist) return;
+
+      const tA = ((w2.a.x - w1.a.x) * dx1 + (w2.a.y - w1.a.y) * dy1) / (len1 * len1);
+      const tB = ((w2.b.x - w1.a.x) * dx1 + (w2.b.y - w1.a.y) * dy1) / (len1 * len1);
+      const minT = Math.min(tA, tB);
+      const maxT = Math.max(tA, tB);
+
+      if (maxT > -0.2 && minT < 1.2) {
+        if (perpDist < minPerp) {
+          minPerp = perpDist;
+          best = {
+            wall: w2,
+            dist: perpDist,
+            thicknessCm: Math.round(perpDist * 100),
+          };
+        }
+      }
+    });
+
+    return best;
+  };
+
+  FC.mergeParallelWalls = function (plan, wallId1, wallId2) {
+    const walls = plan.walls || [];
+    const idx1 = walls.findIndex((w) => w.id === wallId1);
+    const idx2 = walls.findIndex((w) => w.id === wallId2);
+    if (idx1 < 0 || idx2 < 0 || idx1 === idx2) return null;
+
+    const w1 = walls[idx1];
+    const w2 = walls[idx2];
+
+    const dx1 = w1.b.x - w1.a.x;
+    const dy1 = w1.b.y - w1.a.y;
+    const len1 = Math.hypot(dx1, dy1);
+    if (len1 < 1e-4) return null;
+    const ux = dx1 / len1;
+    const uy = dy1 / len1;
+    const nx = -uy;
+    const ny = ux;
+
+    const offset = (w2.a.x - w1.a.x) * nx + (w2.a.y - w1.a.y) * ny;
+    const halfOffset = offset / 2;
+    const p0 = { x: w1.a.x + nx * halfOffset, y: w1.a.y + ny * halfOffset };
+
+    const proj = (p) => (p.x - p0.x) * ux + (p.y - p0.y) * uy;
+    const tMin = Math.min(proj(w1.a), proj(w1.b), proj(w2.a), proj(w2.b));
+    const tMax = Math.max(proj(w1.a), proj(w1.b), proj(w2.a), proj(w2.b));
+
+    const thickness = Math.abs(offset);
+
+    w1.a = { x: FC.round(p0.x + ux * tMin, 3), y: FC.round(p0.y + uy * tMin, 3) };
+    w1.b = { x: FC.round(p0.x + ux * tMax, 3), y: FC.round(p0.y + uy * tMax, 3) };
+
+    walls.splice(idx2, 1);
+
+    (plan.openings || []).forEach((op) => {
+      if (op.hostKey === 'w:' + w2.id) {
+        op.hostKey = 'w:' + w1.id;
+      }
+    });
+
+    if (thickness >= 0.05 && thickness <= 0.45 && plan.settings) {
+      plan.settings.intThickness = FC.round(thickness, 2);
+    }
+
+    return { mergedWall: w1, thickness, removedWallId: w2.id };
+  };
+
+  FC.consolidateAllDoubleWalls = function (plan, maxDist) {
+    maxDist = maxDist || 0.45;
+    let count = 0;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const walls = plan.walls || [];
+      for (let i = 0; i < walls.length; i++) {
+        const candidate = FC.findParallelWall(plan, walls[i].id, maxDist);
+        if (candidate) {
+          FC.mergeParallelWalls(plan, walls[i].id, candidate.wall.id);
+          count++;
+          changed = true;
+          break;
+        }
+      }
+    }
+    return count;
+  };
 })();
