@@ -187,6 +187,18 @@
       }
       if (best) return best;
 
+      // Doors & openings snapping
+      if (FC.getOpeningSnapPoints) {
+        const opSnaps = FC.getOpeningSnapPoints(plan);
+        for (const opPt of opSnaps) {
+          const d = FC.dist(raw, opPt);
+          if (d <= tol && (!best || d < best.d)) {
+            best = { d, point: { x: opPt.x, y: opPt.y }, type: 'door', label: opPt.label, hit: opPt };
+          }
+        }
+        if (best) return best;
+      }
+
       // Nearest wall
       const wallHit = FC.nearestWall(plan, raw, this.screenTol(11));
       if (wallHit) {
@@ -415,7 +427,10 @@
           e.preventDefault();
         }
       } else if (e.key === 'Escape') {
-        if (this.wallChain) {
+        if (this.connectMode) {
+          this.endConnectMode();
+          e.preventDefault();
+        } else if (this.wallChain) {
           this.endWallChain();
           e.preventDefault();
         } else if (tool === 'room' && this.roomChain) {
@@ -579,6 +594,27 @@
         return;
       }
 
+      if (this.connectMode) {
+        const hit = this.hitTest(w);
+        if (hit && (hit.type === 'wall' || hit.type === 'junction')) {
+          let targetKeyOrId = null;
+          if (hit.type === 'wall') {
+            targetKeyOrId = hit.seg.id || hit.seg.key;
+          } else if (hit.type === 'junction' && hit.junction.refs && hit.junction.refs.length) {
+            const ref = hit.junction.refs[0];
+            targetKeyOrId = ref.type === 'wall' ? ref.wallId : ('o:' + ref.index);
+          }
+          if (targetKeyOrId && targetKeyOrId !== this.connectMode.sourceWallId) {
+            const src = this.connectMode.sourceWallId;
+            this.endConnectMode();
+            this.app.connectWalls([src, targetKeyOrId]);
+            return;
+          }
+        }
+        this.endConnectMode();
+        return;
+      }
+
       const hit = this.hitTest(w);
       if (hit) {
         if (hit.type === 'junction') {
@@ -610,7 +646,53 @@
           this.drag = { type: 'wall-end', wallId: hit.wallId, end: hit.end, moved: false, pushed: false };
           return;
         }
+        if (hit.type === 'wall-extend-handle') {
+          const wall = this.app.plan.walls.find((x) => x.id === hit.wallId);
+          if (wall) {
+            this.drag = {
+              type: 'wall-extend',
+              wallId: hit.wallId,
+              end: hit.end,
+              orig: { a: { x: wall.a.x, y: wall.a.y }, b: { x: wall.b.x, y: wall.b.y } },
+              moved: false,
+              pushed: false,
+            };
+            return;
+          }
+        }
         if (hit.type === 'wall') {
+          if (e.shiftKey) {
+            let currentKeys = [];
+            let currentIds = [];
+            const curSel = this.app.ui.selection;
+            if (curSel && curSel.type === 'walls') {
+              currentKeys = curSel.keys.slice();
+              currentIds = (curSel.ids || []).slice();
+            } else if (curSel && curSel.type === 'wall' && curSel.key) {
+              currentKeys = [curSel.key];
+              const curSeg = FC.segmentByKey(this.app.plan, curSel.key);
+              if (curSeg && curSeg.id) currentIds = [curSeg.id];
+            }
+            const key = hit.seg.key;
+            const id = hit.seg.id;
+            if (currentKeys.includes(key)) {
+              currentKeys = currentKeys.filter((k) => k !== key);
+              if (id) currentIds = currentIds.filter((x) => x !== id);
+            } else {
+              currentKeys.push(key);
+              if (id && !currentIds.includes(id)) currentIds.push(id);
+            }
+            if (currentKeys.length > 1) {
+              this.app.select({ type: 'walls', keys: currentKeys, ids: currentIds });
+              return;
+            } else if (currentKeys.length === 1) {
+              this.app.select({ type: 'wall', key: currentKeys[0] });
+              return;
+            } else {
+              this.app.clearSelection();
+              return;
+            }
+          }
           this.app.select({ type: 'wall', key: hit.seg.key });
           this.drag = { type: 'wall', key: hit.seg.key, seg: hit.seg, startW: { x: w.x, y: w.y }, moved: false, pushed: false };
           return;
@@ -685,6 +767,19 @@
       this.snap = null;
       this.app.changed({ rooms: true, furniture: true, save: true });
       this.app.ui.updateHint();
+      this.draw();
+    }
+
+    startConnectMode(sourceWallId) {
+      this.connectMode = { sourceWallId };
+      this.app.toast('Click another wall or corner to connect them (Esc to cancel)', 'info');
+      this.updateCursor();
+      this.draw();
+    }
+
+    endConnectMode() {
+      this.connectMode = null;
+      this.updateCursor();
       this.draw();
     }
 
@@ -796,9 +891,33 @@
 
     onPointerUp() {
       if (this.drag) {
-        const wasMoving = this.drag.type !== 'pan';
-        if (this.drag.moved && this.drag.type !== 'pan') {
-          this.app.changed({ rooms: true, furniture: true, save: true });
+        const wasMoving = this.drag.type !== 'pan' && this.drag.moved;
+        const dragType = this.drag.type;
+        if (wasMoving) {
+          if (dragType === 'furniture' || dragType === 'furniture-rotate') {
+            const f = this.drag.furniture;
+            if (f) {
+              const r = this.hitRoom({ x: f.x, y: f.y });
+              if (r) f.roomId = r.id;
+              f.custom = true;
+            }
+            if (this.app.plan) this.app.plan.furniture = this.app.furniture;
+            this.app.changed({ rooms: false, furniture: false, save: true });
+          } else if (dragType === 'light' || dragType === 'opening') {
+            this.app.changed({ rooms: false, furniture: false, save: true });
+          } else {
+            if (dragType === 'junction' && this.drag.junction) {
+              const jPt = { x: this.drag.junction.x, y: this.drag.junction.y };
+              const junctions = FC.findJunctions(this.app.plan, this.screenTol(14));
+              const otherJ = junctions.find((other) => other.id !== this.drag.junction.id && FC.dist(jPt, other) < this.screenTol(12));
+              if (otherJ) {
+                FC.moveJunction(this.app.plan, this.drag.junction, otherJ.x, otherJ.y);
+              }
+            }
+            this.app.changed({ rooms: true, furniture: false, save: true });
+          }
+        } else if (this.drag.type === 'junction') {
+          this.app.select({ type: 'junction', junction: this.drag.junction });
         }
         this.drag = null;
         if (wasMoving) this.updateCursor();
@@ -897,6 +1016,7 @@
         const dy = w.y - this.drag.startW.y;
         f.x = FC.round(this.drag.orig.x + dx, 3);
         f.y = FC.round(this.drag.orig.y + dy, 3);
+        f.custom = true;
         this.app.changed({ rooms: false, furniture: false, save: false });
         if (this.app.viewer) this.app.viewer.markDirty();
         return;
@@ -910,6 +1030,7 @@
         const angle = Math.atan2(w.y - f.y, w.x - f.x) - Math.PI / 2;
         const snapAngle = this.app.ui.ortho ? Math.round(angle / (Math.PI / 4)) * (Math.PI / 4) : Math.round(angle / (Math.PI / 12)) * (Math.PI / 12);
         f.rot = FC.round(snapAngle, 3);
+        f.custom = true;
         this.app.changed({ rooms: false, furniture: false, save: false });
         if (this.app.viewer) this.app.viewer.markDirty();
         return;
@@ -1047,6 +1168,58 @@
         this.app.changed({ rooms: true, furniture: false, save: false });
         return;
       }
+      if (this.drag.type === 'wall-extend') {
+        if (!this.drag.pushed) {
+          this.app.pushHistory();
+          this.drag.pushed = true;
+        }
+        const wall = plan.walls.find((x) => x.id === this.drag.wallId);
+        if (!wall) return;
+        const isEndB = this.drag.end === 0;
+        const origin = isEndB ? this.drag.orig.a : this.drag.orig.b;
+        const curDir = isEndB
+          ? { x: this.drag.orig.b.x - this.drag.orig.a.x, y: this.drag.orig.b.y - this.drag.orig.a.y }
+          : { x: this.drag.orig.a.x - this.drag.orig.b.x, y: this.drag.orig.a.y - this.drag.orig.b.y };
+        const baseLen = Math.hypot(curDir.x, curDir.y);
+        if (baseLen < 1e-4) return;
+        const u = { x: curDir.x / baseLen, y: curDir.y / baseLen };
+
+        // Project mouse w onto collinear line
+        const mouseProj = (w.x - origin.x) * u.x + (w.y - origin.y) * u.y;
+        let newLen = Math.max(0.3, mouseProj);
+
+        // Snapping to grid, doors, and walls along the ray
+        const tol = this.screenTol(14);
+        let snapGuide = null;
+        if (this.gridSnap && this.app.plan.settings.snapGrid !== false && !this.altDown) {
+          newLen = Math.round(newLen * 10) / 10;
+        }
+        if (!this.altDown) {
+          const targetPt = { x: origin.x + u.x * newLen, y: origin.y + u.y * newLen };
+          if (FC.getOpeningSnapPoints) {
+            const opSnaps = FC.getOpeningSnapPoints(plan);
+            for (const opPt of opSnaps) {
+              if (FC.dist(targetPt, opPt) < tol) {
+                newLen = (opPt.x - origin.x) * u.x + (opPt.y - origin.y) * u.y;
+                snapGuide = { point: opPt, type: 'door', label: 'Snap: ' + opPt.label };
+                break;
+              }
+            }
+          }
+          if (!snapGuide) {
+            const near = FC.nearestWall(plan, targetPt, tol, (s) => !s.wall || s.wall.id !== wall.id);
+            if (near) {
+              newLen = (near.point.x - origin.x) * u.x + (near.point.y - origin.y) * u.y;
+              snapGuide = { point: near.point, type: 'wall', label: 'Snap: Wall' };
+            }
+          }
+        }
+        this.snap = snapGuide;
+
+        FC.resizeWall(plan, wall.id, newLen, isEndB ? 0 : 1);
+        this.app.changed({ rooms: true, furniture: false, save: false });
+        return;
+      }
       if (this.drag.type === 'wall') {
         if (!this.drag.pushed) {
           this.app.pushHistory();
@@ -1070,8 +1243,83 @@
           if (!wall) return;
           if (!this.drag.orig) this.drag.orig = { a: { x: wall.a.x, y: wall.a.y }, b: { x: wall.b.x, y: wall.b.y } };
           if (!this.drag.startW) this.drag.startW = { x: w.x, y: w.y };
-          const dx = w.x - this.drag.startW.x;
-          const dy = w.y - this.drag.startW.y;
+          let dx = w.x - this.drag.startW.x;
+          let dy = w.y - this.drag.startW.y;
+
+          let candA = { x: this.drag.orig.a.x + dx, y: this.drag.orig.a.y + dy };
+          let candB = { x: this.drag.orig.b.x + dx, y: this.drag.orig.b.y + dy };
+          let candMid = { x: (candA.x + candB.x) / 2, y: (candA.y + candB.y) / 2 };
+
+          const tol = this.screenTol(14);
+          let snapGuide = null;
+
+          if (!this.altDown) {
+            // 1. Snap to doors
+            if (FC.getOpeningSnapPoints) {
+              const opSnaps = FC.getOpeningSnapPoints(plan);
+              for (const opPt of opSnaps) {
+                const dA = FC.dist(candA, opPt);
+                const dB = FC.dist(candB, opPt);
+                const dMid = FC.dist(candMid, opPt);
+                if (dA < tol) {
+                  dx += opPt.x - candA.x;
+                  dy += opPt.y - candA.y;
+                  snapGuide = { point: opPt, type: 'door', label: 'Snap: ' + opPt.label };
+                  break;
+                } else if (dB < tol) {
+                  dx += opPt.x - candB.x;
+                  dy += opPt.y - candB.y;
+                  snapGuide = { point: opPt, type: 'door', label: 'Snap: ' + opPt.label };
+                  break;
+                } else if (dMid < tol) {
+                  dx += opPt.x - candMid.x;
+                  dy += opPt.y - candMid.y;
+                  snapGuide = { point: opPt, type: 'door', label: 'Snap: ' + opPt.label };
+                  break;
+                }
+              }
+            }
+
+            // 2. Snap to other wall endpoints
+            if (!snapGuide) {
+              const verts = this.allVertices().filter((v) => !v.wallId || v.wallId !== wall.id);
+              for (const v of verts) {
+                const dA = FC.dist(candA, v.p);
+                const dB = FC.dist(candB, v.p);
+                if (dA < tol) {
+                  dx += v.p.x - candA.x;
+                  dy += v.p.y - candA.y;
+                  snapGuide = { point: v.p, type: 'point', label: 'Snap: ' + v.label };
+                  break;
+                } else if (dB < tol) {
+                  dx += v.p.x - candB.x;
+                  dy += v.p.y - candB.y;
+                  snapGuide = { point: v.p, type: 'point', label: 'Snap: ' + v.label };
+                  break;
+                }
+              }
+            }
+
+            // 3. Snap to nearest wall line
+            if (!snapGuide) {
+              const nearA = FC.nearestWall(plan, candA, tol, (s) => !s.wall || s.wall.id !== wall.id);
+              if (nearA) {
+                dx += nearA.point.x - candA.x;
+                dy += nearA.point.y - candA.y;
+                snapGuide = { point: nearA.point, type: 'wall', label: 'Snap: Wall' };
+              } else {
+                const nearB = FC.nearestWall(plan, candB, tol, (s) => !s.wall || s.wall.id !== wall.id);
+                if (nearB) {
+                  dx += nearB.point.x - candB.x;
+                  dy += nearB.point.y - candB.y;
+                  snapGuide = { point: nearB.point, type: 'wall', label: 'Snap: Wall' };
+                }
+              }
+            }
+          }
+
+          this.snap = snapGuide;
+
           wall.a.x = FC.round(this.drag.orig.a.x + dx, 3);
           wall.a.y = FC.round(this.drag.orig.a.y + dy, 3);
           wall.b.x = FC.round(this.drag.orig.b.x + dx, 3);
@@ -1104,6 +1352,10 @@
     }
 
     updateCursor() {
+      if (this.connectMode) {
+        this.canvas.style.cursor = 'crosshair';
+        return;
+      }
       const tool = this.app.ui.tool;
       let c = 'default';
       if (this.drag && this.drag.type === 'pan') c = 'grabbing';
@@ -1252,6 +1504,28 @@
       const hit = this.hitTest(w);
       const items = [];
 
+      if (this.app.ui && this.app.ui.selection && this.app.ui.selection.type === 'walls') {
+        const wallCount = this.app.ui.selection.keys ? this.app.ui.selection.keys.length : 2;
+        items.push({
+          label: `Connect ${wallCount} selected walls`,
+          icon: 'link',
+          action: () => this.app.connectWalls(),
+        });
+        items.push({
+          label: `Merge selected walls`,
+          icon: 'merge',
+          action: () => this.app.mergeWalls(),
+        });
+        items.push({
+          label: 'Delete selected walls',
+          icon: 'trash',
+          danger: true,
+          action: () => this.app.deleteSelection(),
+        });
+        this.app.ui.openContextMenu(e.clientX, e.clientY, items);
+        return;
+      }
+
       if (hit && hit.type === 'opening') {
         const op = hit.op;
         this.app.select({ type: 'opening', id: op.id });
@@ -1343,6 +1617,22 @@
           }
           items.push({ separator: true });
           items.push({
+            label: 'Connect to another wall...',
+            icon: 'link',
+            action: () => this.app.startConnectMode(seg.id),
+          });
+          items.push({
+            label: 'Connect to nearest wall / corner',
+            icon: 'sparkles',
+            action: () => this.app.connectWallToNearest(seg.id),
+          });
+          items.push({
+            label: 'Extend to next wall',
+            icon: 'expand',
+            action: () => this.app.extendWallToBoundary(seg.id, 2),
+          });
+          items.push({ separator: true });
+          items.push({
             label: 'Split wall here',
             icon: 'sliders',
             action: () => this.app.splitWallAt(seg.id, w),
@@ -1386,6 +1676,23 @@
 
       const lightHit = this.hitLight(w);
       if (lightHit) return { type: 'light', light: lightHit };
+
+      if (this.app.ui && this.app.ui.selection && this.app.ui.selection.type === 'wall') {
+        const selSeg = FC.segmentByKey(plan, this.app.ui.selection.key);
+        if (selSeg && !selSeg.boundary) {
+          const dir = { x: Math.cos(selSeg.angle), y: Math.sin(selSeg.angle) };
+          const handleTol = this.screenTol(12);
+          const handleDist = this.screenTol(16);
+          const pA = { x: selSeg.a.x - dir.x * handleDist, y: selSeg.a.y - dir.y * handleDist };
+          const pB = { x: selSeg.b.x + dir.x * handleDist, y: selSeg.b.y + dir.y * handleDist };
+          if (FC.dist(w, pB) <= handleTol) {
+            return { type: 'wall-extend-handle', wallId: selSeg.id, end: 0, pt: pB };
+          }
+          if (FC.dist(w, pA) <= handleTol) {
+            return { type: 'wall-extend-handle', wallId: selSeg.id, end: 1, pt: pA };
+          }
+        }
+      }
 
       const junc = this.hitJunction(w);
       if (junc) return { type: 'junction', junction: junc };
@@ -1436,8 +1743,14 @@
       const segs = FC.getSegments(plan);
 
       this.drawRooms(rooms);
+      if (this.app.detectedRoomsPreview && this.app.detectedRoomsPreview.length) {
+        this.drawDetectedRoomsPreview(this.app.detectedRoomsPreview);
+      }
       if (this.app.plan.furnished) this.drawFurniture();
       this.drawRoomLabels(rooms);
+      if (this.app.detectedRoomsPreview && this.app.detectedRoomsPreview.length) {
+        this.drawDetectedRoomLabels(this.app.detectedRoomsPreview);
+      }
       this.drawWalls(segs);
       this.drawOpenings(segs);
       this.drawLights();
@@ -1540,6 +1853,67 @@
       });
     }
 
+    drawDetectedRoomsPreview(candidates) {
+      const ctx = this.ctx;
+      ctx.save();
+      candidates.forEach((cand) => {
+        if (!cand.polygon || cand.polygon.length < 3) return;
+        ctx.beginPath();
+        cand.polygon.forEach((p, i) => {
+          const s = this.w2s(p);
+          if (i === 0) ctx.moveTo(s.x, s.y);
+          else ctx.lineTo(s.x, s.y);
+        });
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(139, 92, 246, 0.16)';
+        ctx.fill();
+
+        ctx.strokeStyle = '#8b5cf6';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+
+    drawDetectedRoomLabels(candidates) {
+      const ctx = this.ctx;
+      candidates.forEach((cand) => {
+        if (!cand.centroid || !cand.polygon) return;
+        const type = FC.roomTypes[cand.type] || FC.roomTypes.living;
+        const s = this.w2s(cand.centroid);
+        const name = cand.name || type.label;
+        const areaTxt = FC.fmt(cand.area, 1) + ' m²';
+        const labelTxt = '✨ ' + name + ' · ' + areaTxt;
+
+        ctx.save();
+        ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
+        const textMetrics = ctx.measureText(labelTxt);
+        const padX = 8;
+        const padY = 4;
+        const boxW = textMetrics.width + padX * 2;
+        const boxH = 20;
+
+        ctx.fillStyle = 'rgba(24, 25, 32, 0.90)';
+        ctx.strokeStyle = 'rgba(139, 92, 246, 0.85)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(s.x - boxW / 2, s.y - boxH / 2, boxW, boxH, 10);
+        } else {
+          ctx.rect(s.x - boxW / 2, s.y - boxH / 2, boxW, boxH);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#f5f3ff';
+        ctx.fillText(labelTxt, s.x, s.y + 0.5);
+        ctx.restore();
+      });
+    }
+
     drawWalls(segs) {
       const ctx = this.ctx;
       if (!segs.length) return;
@@ -1620,9 +1994,63 @@
           ctx.lineTo(b.x, b.y);
           ctx.stroke();
           [a, b, mid].forEach((p, idx) => this.handleDot(p, idx === 2 ? '#ffffff' : ACCENT));
+          if (!seg.boundary) {
+            const dir = { x: Math.cos(seg.angle), y: Math.sin(seg.angle) };
+            const handleDist = 16;
+            const hA = { x: a.x - dir.x * handleDist, y: a.y - dir.y * handleDist };
+            const hB = { x: b.x + dir.x * handleDist, y: b.y + dir.y * handleDist };
+            [hA, hB].forEach((hp) => {
+              ctx.beginPath();
+              ctx.arc(hp.x, hp.y, 4.5, 0, TAU);
+              ctx.fillStyle = '#6366f1';
+              ctx.strokeStyle = '#ffffff';
+              ctx.lineWidth = 1.5;
+              ctx.fill();
+              ctx.stroke();
+            });
+          }
           this.drawPill(mid.x, mid.y - 18, seg.len.toFixed(2) + ' m', 'dark');
         }
-      } else if (this.hover && this.hover.type === 'wall' && this.hover.seg) {
+      } else if (sel && sel.type === 'walls' && Array.isArray(sel.keys)) {
+        sel.keys.forEach((key) => {
+          const seg = segs.find((s) => s.key === key);
+          if (!seg) return;
+          const a = this.w2s(seg.a);
+          const b = this.w2s(seg.b);
+          const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+          ctx.strokeStyle = 'rgba(91,75,246,0.35)';
+          ctx.lineWidth = seg.thickness * this.view.scale + 7;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.strokeStyle = ACCENT;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          [a, b, mid].forEach((p, idx) => this.handleDot(p, idx === 2 ? '#ffffff' : ACCENT));
+        });
+      }
+
+      if (this.connectMode && this.connectMode.sourceWallId) {
+        const srcSeg = segs.find((s) => s.id === this.connectMode.sourceWallId);
+        if (srcSeg) {
+          const a = this.w2s(srcSeg.a);
+          const b = this.w2s(srcSeg.b);
+          ctx.save();
+          ctx.strokeStyle = 'rgba(99,102,241,0.5)';
+          ctx.lineWidth = srcSeg.thickness * this.view.scale + 8;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      if (!this.connectMode && this.hover && this.hover.type === 'wall' && this.hover.seg) {
         const seg = this.hover.seg;
         const a = this.w2s(seg.a);
         const b = this.w2s(seg.b);
@@ -2048,6 +2476,19 @@
           ctx.stroke();
           return;
         }
+        if (it.kind === 'artwork') {
+          ctx.save();
+          ctx.translate(s.x, s.y);
+          ctx.rotate(it.rot);
+          this.roundRect(-w / 2, -d / 2, w, d, 1);
+          ctx.fillStyle = 'rgba(180,130,90,0.55)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(60,45,30,0.85)';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+          ctx.restore();
+          return;
+        }
         ctx.save();
         ctx.translate(s.x, s.y);
         ctx.rotate(it.rot);
@@ -2288,6 +2729,61 @@
     drawHover(segs) {
       if (!this.hover) return;
       const ctx = this.ctx;
+      if (this.connectMode && this.hover.type === 'wall' && this.hover.seg) {
+        const seg = this.hover.seg;
+        const a = this.w2s(seg.a);
+        const b = this.w2s(seg.b);
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        ctx.save();
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = seg.thickness * this.view.scale + 6;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        this.drawPill(mid.x, mid.y - 22, 'Click to connect with this wall', 'dark');
+        ctx.restore();
+        return;
+      }
+      if (this.hover.type === 'wall-extend-handle') {
+        const s = this.w2s(this.hover.point);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 8, 0, TAU);
+        ctx.fillStyle = 'rgba(234, 88, 12, 0.25)';
+        ctx.fill();
+        ctx.strokeStyle = '#ea580c';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 5, 0, TAU);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.stroke();
+        this.drawPill(s.x, s.y - 22, 'Drag to extend wall (doors stay fixed)', 'dark');
+        ctx.restore();
+        return;
+      }
+      if (this.hover.type === 'junction') {
+        const j = this.hover.junction;
+        const s = this.w2s(j);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 8, 0, TAU);
+        ctx.fillStyle = 'rgba(91, 75, 246, 0.25)';
+        ctx.fill();
+        ctx.strokeStyle = '#5b4bf6';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 5, 0, TAU);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.stroke();
+        const wallCount = j.refs ? j.refs.length : 1;
+        const label = wallCount > 1 ? `Slide junction (${wallCount} walls)` : 'Slide wall end';
+        this.drawPill(s.x, s.y - 22, label, 'accent');
+        ctx.restore();
+        return;
+      }
       if (this.hover.type === 'outline-vertex' || this.hover.type === 'wall-end') {
         const p = this.hover.type === 'outline-vertex' ? this.app.plan.outline[this.hover.index] : null;
         if (p) this.handleDot(this.w2s(p), false);
@@ -2322,9 +2818,9 @@
       ctx.arc(s.x, s.y, this.snap.type === 'close' ? 8 : 5.5, 0, TAU);
       ctx.fill();
       ctx.stroke();
-      if (this.snap.type === 'point' || this.snap.type === 'close' || this.snap.type === 'axis' || this.snap.type === 'wall') {
+      if (this.snap.type === 'point' || this.snap.type === 'close' || this.snap.type === 'axis' || this.snap.type === 'wall' || this.snap.type === 'door') {
         const label = this.snap.label;
-        if (label) this.drawPill(s.x, s.y - 20, label, this.snap.type === 'close' ? 'warning' : 'light');
+        if (label) this.drawPill(s.x, s.y - 20, label, this.snap.type === 'close' ? 'warning' : (this.snap.type === 'door' ? 'accent' : 'light'));
       }
       ctx.restore();
     }

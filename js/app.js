@@ -72,6 +72,7 @@
       this.projects = [];
       this.plan = null;
       this.rooms = [];
+      this.detectedRoomsPreview = null;
       this.furniture = [];
       this.saveStatus = 'saved';
       this._history = [];
@@ -160,9 +161,30 @@
 
     _preparePlanState() {
       this.plan.rooms = Array.isArray(this.plan.rooms) ? this.plan.rooms : [];
-      this.rooms = FC.detectRooms(this.plan);
-      this.plan.rooms = this._roomMeta();
-      this.furniture = this.plan.furnished ? FC.furnishPlan(this.plan, this.rooms) : [];
+      if (this.plan.autoDetectRooms === false && this.plan.rooms.length > 0) {
+        this.rooms = this.plan.rooms.map((r) => {
+          const poly = Array.isArray(r.polygon) ? r.polygon.map((p) => ({ x: p.x, y: p.y })) : [];
+          return Object.assign({}, r, {
+            polygon: poly,
+            area: r.area != null ? r.area : (poly.length >= 3 ? Math.abs(FC.polygonArea(poly)) : 0),
+            centroid: r.centroid || (poly.length >= 3 ? FC.polygonCentroid(poly) : { x: 0, y: 0 }),
+            bounds: r.bounds || (poly.length >= 3 ? FC.polygonBounds(poly) : null),
+            isManual: r.isManual != null ? r.isManual : true,
+          });
+        });
+      } else {
+        this.rooms = FC.detectRooms(this.plan);
+        this.plan.rooms = this._roomMeta();
+      }
+      if (Array.isArray(this.plan.furniture) && this.plan.furniture.length > 0) {
+        this.furniture = this.plan.furniture;
+      } else if (this.plan.furnished) {
+        this.furniture = FC.furnishPlan(this.plan, this.rooms);
+        this.plan.furniture = this.furniture;
+      } else {
+        this.furniture = [];
+        this.plan.furniture = [];
+      }
       const p = this.plan;
       const hasOutline = (p.outline || []).length >= 3;
       this.ui.step = p.furnished && this.rooms.length
@@ -183,17 +205,21 @@
         type: r.type,
         name: r.name,
         area: r.area,
-        centroid: { x: r.centroid.x, y: r.centroid.y },
-        bounds: {
-          x0: r.bounds.x0,
-          y0: r.bounds.y0,
-          x1: r.bounds.x1,
-          y1: r.bounds.y1,
-          w: r.bounds.w,
-          d: r.bounds.d,
-          cx: r.bounds.cx,
-          cy: r.bounds.cy,
-        },
+        polygon: Array.isArray(r.polygon) ? r.polygon.map((p) => ({ x: p.x, y: p.y })) : [],
+        centroid: r.centroid ? { x: r.centroid.x, y: r.centroid.y } : { x: 0, y: 0 },
+        bounds: r.bounds
+          ? {
+              x0: r.bounds.x0,
+              y0: r.bounds.y0,
+              x1: r.bounds.x1,
+              y1: r.bounds.y1,
+              w: r.bounds.w,
+              d: r.bounds.d,
+              cx: r.bounds.cx,
+              cy: r.bounds.cy,
+            }
+          : null,
+        isManual: !!r.isManual,
       }));
     }
 
@@ -246,14 +272,28 @@
     recomputeRooms() {
       if (!this.plan) return;
       FC.ensureOpeningHosts(this.plan);
+      if (this.plan.autoDetectRooms === false) {
+        if (this.detectedRoomsPreview) {
+          this.detectedRoomsPreview = FC.detectRooms(this.plan);
+        }
+        return;
+      }
       this.rooms = FC.detectRooms(this.plan);
       this.plan.rooms = this._roomMeta();
     }
 
-    recomputeFurniture() {
-      this.furniture = this.plan.furnished
-        ? FC.furnishPlan(this.plan, this.rooms || [])
-        : [];
+    recomputeFurniture(force = false) {
+      if (!this.plan.furnished) {
+        this.furniture = [];
+        this.plan.furniture = [];
+        return;
+      }
+      if (!force && Array.isArray(this.plan.furniture) && this.plan.furniture.length > 0) {
+        this.furniture = this.plan.furniture;
+        return;
+      }
+      this.furniture = FC.furnishPlan(this.plan, this.rooms || []);
+      this.plan.furniture = this.furniture;
     }
 
     stats() {
@@ -295,7 +335,9 @@
 
     _snapshot(plan) {
       if (!plan) return '';
-      const clone = Object.assign({}, plan);
+      const clone = Object.assign({}, plan, {
+        furniture: (this.furniture || plan.furniture || []).map((f) => Object.assign({}, f)),
+      });
       delete clone.updatedAt;
       return JSON.stringify(clone);
     }
@@ -355,9 +397,26 @@
       }
       this.plan = restored;
       this._syncPlan();
-      this.rooms = FC.detectRooms(this.plan);
-      this.plan.rooms = this._roomMeta();
-      this.recomputeFurniture();
+      if (this.plan.autoDetectRooms === false && Array.isArray(this.plan.rooms) && this.plan.rooms.length > 0) {
+        this.rooms = this.plan.rooms.map((r) => {
+          const poly = Array.isArray(r.polygon) ? r.polygon.map((p) => ({ x: p.x, y: p.y })) : [];
+          return Object.assign({}, r, {
+            polygon: poly,
+            area: r.area != null ? r.area : (poly.length >= 3 ? Math.abs(FC.polygonArea(poly)) : 0),
+            centroid: r.centroid || (poly.length >= 3 ? FC.polygonCentroid(poly) : { x: 0, y: 0 }),
+            bounds: r.bounds || (poly.length >= 3 ? FC.polygonBounds(poly) : null),
+            isManual: r.isManual != null ? r.isManual : true,
+          });
+        });
+      } else {
+        this.rooms = FC.detectRooms(this.plan);
+        this.plan.rooms = this._roomMeta();
+      }
+      if (Array.isArray(this.plan.furniture) && this.plan.furniture.length > 0) {
+        this.furniture = this.plan.furniture;
+      } else {
+        this.recomputeFurniture();
+      }
       if (this.editor) {
         const isWallTool = this.ui && (this.ui.tool === 'wall' || this.ui.tool === 'divider');
         if (isWallTool && this.editor.wallChain) {
@@ -518,11 +577,120 @@
       if (this.editor) this.editor.draw();
     }
 
+    disableAutoDetectRooms(quiet = false) {
+      if (!this.plan) return;
+      if (this.plan.autoDetectRooms === false) return;
+      this.plan.autoDetectRooms = false;
+      this.plan.rooms = this._roomMeta();
+      if (!quiet) {
+        this.toast('Switched to manual room mode (auto-detection paused)', 'info');
+      }
+      if (this.ui) {
+        this.ui.renderStep();
+        this.ui.renderSidebar();
+      }
+    }
+
+    enableAutoDetectRooms() {
+      if (!this.plan) return;
+      this.pushHistory();
+      this.plan.autoDetectRooms = true;
+      this.detectedRoomsPreview = null;
+      this.rooms = FC.detectRooms(this.plan);
+      this.plan.rooms = this._roomMeta();
+      if (this.plan.furnished) this.recomputeFurniture();
+      this.changed({ save: true });
+      if (this.ui) this.ui.renderAll();
+      if (this.editor) this.editor.draw();
+      this.toast('Automatic room detection enabled (' + (this.rooms ? this.rooms.length : 0) + ' rooms detected)', 'success');
+    }
+
+    toggleAutoDetectRooms() {
+      if (!this.plan) return;
+      if (this.plan.autoDetectRooms === false) {
+        this.enableAutoDetectRooms();
+      } else {
+        this.disableAutoDetectRooms(false);
+      }
+    }
+
+    toggleDetectedRoomsPreview() {
+      if (this.detectedRoomsPreview) {
+        this.dismissDetectedRoomsPreview();
+        return;
+      }
+      const candidates = FC.detectRooms(this.plan);
+      this.detectedRoomsPreview = candidates;
+      if (this.editor) this.editor.draw();
+      if (this.ui) this.ui.renderStep();
+      if (!candidates || !candidates.length) {
+        this.toast('No enclosed rooms detected from current walls.', 'info');
+      } else {
+        this.toast(candidates.length + ' rooms detected in preview (manual layout unchanged)', 'info');
+      }
+    }
+
+    dismissDetectedRoomsPreview() {
+      this.detectedRoomsPreview = null;
+      if (this.editor) this.editor.draw();
+      if (this.ui) this.ui.renderStep();
+    }
+
+    applyDetectedRooms(enableAuto = true) {
+      if (!this.plan) return;
+      this.pushHistory();
+      const detected = this.detectedRoomsPreview || FC.detectRooms(this.plan);
+      this.rooms = detected;
+      this.detectedRoomsPreview = null;
+      if (enableAuto) {
+        this.plan.autoDetectRooms = true;
+      }
+      this.plan.rooms = this._roomMeta();
+      if (this.plan.furnished) this.recomputeFurniture();
+      this.changed({ save: true });
+      if (this.ui) this.ui.renderAll();
+      if (this.editor) this.editor.draw();
+      this.toast('Applied ' + this.rooms.length + ' detected rooms', 'success');
+    }
+
+    adoptDetectedRoom(candidateId) {
+      if (!this.detectedRoomsPreview) return;
+      const cand = this.detectedRoomsPreview.find((c) => c.id === candidateId);
+      if (!cand) return;
+      this.pushHistory();
+      this.disableAutoDetectRooms(true);
+      this.rooms = this.rooms || [];
+      this.rooms = this.rooms.filter((r) => r.id !== cand.id);
+      const clean = FC.dedupePolygon(cand.polygon);
+      const newRoom = {
+        id: cand.id || FC.uid('room_manual'),
+        name: cand.name || (FC.roomTypes[cand.type] ? FC.roomTypes[cand.type].label : 'Room'),
+        type: cand.type || 'living',
+        polygon: clean,
+        area: cand.area || Math.abs(FC.polygonArea(clean)),
+        centroid: cand.centroid || FC.polygonCentroid(clean),
+        bounds: cand.bounds || FC.polygonBounds(clean),
+        isManual: true,
+      };
+      this.rooms.push(newRoom);
+      this.plan.rooms = this._roomMeta();
+      if (this.plan.furnished) this.recomputeFurniture();
+      this.select({ type: 'room', id: newRoom.id });
+      this.changed({ save: true });
+      if (this.ui) this.ui.renderAll();
+      if (this.editor) this.editor.draw();
+      this.toast('Adopted "' + newRoom.name + '" (' + newRoom.area.toFixed(1) + ' m²)', 'success');
+    }
+
     setRoomType(roomId, type) {
       if (!FC.roomTypes[type]) return;
       const room = (this.rooms || []).find((r) => r.id === roomId);
       if (!room || room.type === type) return;
       this.pushHistory();
+      if (this.plan.autoDetectRooms !== false) {
+        this.disableAutoDetectRooms(true);
+        this.toast('Room type changed — auto-detection paused to protect manual edits', 'info');
+      }
       const oldType = FC.roomTypes[room.type];
       const oldLabel = oldType ? oldType.label : '';
       room.type = type;
@@ -537,6 +705,10 @@
     setRoomName(roomId, name) {
       const room = (this.rooms || []).find((r) => r.id === roomId);
       if (!room) return;
+      if (this.plan.autoDetectRooms !== false) {
+        this.disableAutoDetectRooms(true);
+        this.toast('Room renamed — auto-detection paused to protect manual edits', 'info');
+      }
       room.name = name;
       const meta = (this.plan.rooms || []).find((m) => m.id === roomId);
       if (meta) meta.name = name;
@@ -553,6 +725,9 @@
       const room = (this.rooms || []).find((r) => r.id === roomId);
       if (!room) return;
       this.pushHistory();
+      if (this.plan.autoDetectRooms !== false) {
+        this.disableAutoDetectRooms(true);
+      }
       this.plan.ignoredRooms = this.plan.ignoredRooms || [];
       if (!this.plan.ignoredRooms.includes(roomId)) {
         this.plan.ignoredRooms.push(roomId);
@@ -560,8 +735,13 @@
       if (room.isManual && this.plan.manualRooms) {
         this.plan.manualRooms = this.plan.manualRooms.filter((r) => r.id !== roomId);
       }
-      this.rooms = FC.detectRooms(this.plan);
-      this.plan.rooms = this._roomMeta();
+      if (this.plan.autoDetectRooms === false) {
+        this.rooms = (this.rooms || []).filter((r) => r.id !== roomId);
+        this.plan.rooms = this._roomMeta();
+      } else {
+        this.rooms = FC.detectRooms(this.plan);
+        this.plan.rooms = this._roomMeta();
+      }
       if (this.plan.furnished) this.recomputeFurniture();
       this.clearSelection();
       this.changed({ save: true });
@@ -572,6 +752,9 @@
     addManualRoom(poly, name, type) {
       if (!poly || poly.length < 3) return;
       this.pushHistory();
+      if (this.plan.autoDetectRooms !== false) {
+        this.disableAutoDetectRooms(true);
+      }
       this.plan.manualRooms = this.plan.manualRooms || [];
       const clean = FC.dedupePolygon(poly);
       const area = Math.abs(FC.polygonArea(clean));
@@ -582,8 +765,14 @@
       const rName = name || (FC.roomTypes[t] ? FC.roomTypes[t].label : 'Custom Room');
       const newRoom = { id, name: rName, type: t, polygon: clean, area, centroid, bounds, isManual: true };
       this.plan.manualRooms.push(newRoom);
-      this.rooms = FC.detectRooms(this.plan);
-      this.plan.rooms = this._roomMeta();
+      if (this.plan.autoDetectRooms === false) {
+        this.rooms = this.rooms || [];
+        this.rooms.push(newRoom);
+        this.plan.rooms = this._roomMeta();
+      } else {
+        this.rooms = FC.detectRooms(this.plan);
+        this.plan.rooms = this._roomMeta();
+      }
       if (this.plan.furnished) this.recomputeFurniture();
       this.select({ type: 'room', id });
       this.changed({ save: true });
@@ -596,9 +785,13 @@
       if (!wall) return;
       this.pushHistory();
       wall.virtual = !wall.virtual;
-      this.rooms = FC.detectRooms(this.plan);
-      this.plan.rooms = this._roomMeta();
-      if (this.plan.furnished) this.recomputeFurniture();
+      if (this.plan.autoDetectRooms !== false) {
+        this.rooms = FC.detectRooms(this.plan);
+        this.plan.rooms = this._roomMeta();
+        if (this.plan.furnished) this.recomputeFurniture();
+      } else if (this.detectedRoomsPreview) {
+        this.detectedRoomsPreview = FC.detectRooms(this.plan);
+      }
       this.changed({ save: true });
       this.ui.renderAll();
       if (this.viewer) this.viewer.markDirty();
@@ -625,7 +818,13 @@
         return;
       }
 
-      if (sel.type === 'wall') {
+      if (sel.type === 'walls') {
+        const ids = sel.ids || [];
+        const keys = sel.keys || [];
+        this.pushHistory();
+        this.plan.walls = this.plan.walls.filter((w) => !ids.includes(w.id));
+        this.plan.openings = this.plan.openings.filter((op) => !keys.includes(op.hostKey) && !ids.some((id) => op.hostKey === 'w:' + id));
+      } else if (sel.type === 'wall') {
         const seg = FC.segmentByKey(this.plan, sel.key);
         if (!seg) return;
         if (seg.boundary) {
@@ -634,7 +833,7 @@
         }
         this.pushHistory();
         this.plan.walls = this.plan.walls.filter((w) => w.id !== seg.id);
-        this.plan.openings = this.plan.openings.filter((op) => op.hostKey !== sel.key);
+        this.plan.openings = this.plan.openings.filter((op) => op.hostKey !== sel.key && op.hostKey !== 'w:' + seg.id);
       } else if (sel.type === 'opening') {
         if (!this.plan.openings.some((op) => op.id === sel.id)) return;
         this.pushHistory();
@@ -781,6 +980,7 @@
       this.plan.rooms = [];
       this.plan.furnished = false;
       this.rooms = [];
+      this.detectedRoomsPreview = null;
       this.furniture = [];
       this.ui.drawingFresh = true;
       this.ui.selection = null;
@@ -812,6 +1012,7 @@
       this.rooms = FC.detectRooms(this.plan);
       this.plan.rooms = this._roomMeta();
       this.furniture = FC.furnishPlan(this.plan, this.rooms);
+      this.plan.furniture = this.furniture;
       this._history = [];
       this._future = [];
       this.ui.view3d = false;
@@ -872,7 +1073,7 @@
       this.pushHistory();
       this.plan.furnished = true;
       this.plan.layoutVariation = (this.plan.layoutVariation || 0) + 1;
-      this.recomputeFurniture();
+      this.recomputeFurniture(true);
       this.ui.step = 5;
       this.changed({ furniture: false, save: true });
       if (this.ui) this.ui.renderAll();
@@ -900,6 +1101,148 @@
       if (newW) {
         this.changed({ rooms: true, furniture: true, save: true });
         this.toast('Wall split', 'success');
+      }
+    }
+
+    connectWalls(wallIds) {
+      if (!wallIds || !wallIds.length) {
+        if (this.ui.selection) {
+          if (this.ui.selection.type === 'walls') {
+            wallIds = this.ui.selection.ids || [];
+          } else if (this.ui.selection.type === 'wall' && this.ui.selection.key) {
+            const seg = FC.segmentByKey(this.plan, this.ui.selection.key);
+            if (seg && seg.id) wallIds = [seg.id];
+          }
+        }
+      }
+      if (!wallIds || wallIds.length < 2) {
+        this.toast('Select two or more walls to connect', 'info');
+        return;
+      }
+      this.pushHistory();
+      const res = FC.connectWalls(this.plan, wallIds);
+      if (res && res.length) {
+        this.changed({ rooms: true, furniture: true, save: true });
+        this.toast(`Connected ${wallIds.length} walls! Drag the junction node to slide them together.`, 'success');
+        if (this.editor) this.editor.draw();
+      } else {
+        this.toast('Could not find a valid connection between those walls', 'info');
+      }
+    }
+
+    connectWallToNearest(wallId) {
+      if (!wallId && this.ui.selection && this.ui.selection.type === 'wall') {
+        const seg = FC.segmentByKey(this.plan, this.ui.selection.key);
+        if (seg && seg.id) wallId = seg.id;
+      }
+      if (!wallId) return;
+      const nearest = FC.findNearestWallToWall(this.plan, wallId);
+      if (!nearest || nearest.dist > 3.0) {
+        this.toast('No nearby wall found to connect with', 'info');
+        return;
+      }
+      this.pushHistory();
+      const res = FC.connectTwoWalls(this.plan, wallId, nearest.targetIdOrKey);
+      if (res && res.success) {
+        this.changed({ rooms: true, furniture: true, save: true });
+        this.toast('Connected to nearest wall! Drag junction to slide together.', 'success');
+        if (this.editor) this.editor.draw();
+      } else {
+        this.toast('Could not connect to nearest wall', 'info');
+      }
+    }
+
+    mergeWalls(wallIds) {
+      if (!wallIds || !wallIds.length) {
+        if (this.ui.selection) {
+          if (this.ui.selection.type === 'walls') {
+            wallIds = this.ui.selection.ids || [];
+          } else if (this.ui.selection.type === 'wall' && this.ui.selection.key) {
+            const seg = FC.segmentByKey(this.plan, this.ui.selection.key);
+            if (seg && seg.id) wallIds = [seg.id];
+          }
+        }
+      }
+      if (!wallIds || wallIds.length < 2) {
+        this.toast('Select at least 2 walls to merge (Shift+Click or drag)', 'info');
+        return;
+      }
+      this.pushHistory();
+      let mergedAny = false;
+      let lastMergedId = null;
+      for (let i = 0; i < wallIds.length; i++) {
+        for (let j = i + 1; j < wallIds.length; j++) {
+          const id1 = wallIds[i];
+          const id2 = wallIds[j];
+          const w1 = this.plan.walls.find((w) => w.id === id1);
+          const w2 = this.plan.walls.find((w) => w.id === id2);
+          if (w1 && w2) {
+            const res = FC.mergeWalls(this.plan, id1, id2);
+            if (res && res.merged) {
+              mergedAny = true;
+              lastMergedId = res.wall ? res.wall.id : id1;
+            }
+          }
+        }
+      }
+      if (mergedAny) {
+        if (lastMergedId) {
+          this.select({ type: 'wall', key: 'w:' + lastMergedId });
+        } else {
+          this.select(null);
+        }
+        this.changed({ rooms: true, furniture: true, save: true });
+        this.toast('Merged walls into a single continuous wall!', 'success');
+        if (this.editor) this.editor.draw();
+      } else {
+        this.toast('Selected walls could not be merged (must be collinear in-line or parallel)', 'warning');
+      }
+    }
+
+    extendWallToBoundary(wallId, fromEnd) {
+      if (!wallId && this.ui.selection && this.ui.selection.type === 'wall') {
+        const seg = FC.segmentByKey(this.plan, this.ui.selection.key);
+        if (seg && seg.id) wallId = seg.id;
+      }
+      if (!wallId) return;
+      fromEnd = fromEnd !== undefined ? fromEnd : (this.wallAnchorEnd !== undefined ? this.wallAnchorEnd : 0);
+      this.pushHistory();
+      const res = FC.extendWallToBoundary(this.plan, wallId, fromEnd);
+      if (res && res.extended) {
+        this.changed({ rooms: true, furniture: true, save: true });
+        this.toast(`Extended wall by ${FC.fmt(res.delta, 2)} m to nearest boundary`, 'success');
+        if (this.editor) this.editor.draw();
+      } else {
+        this.toast('No intersecting wall found along this wall direction', 'info');
+      }
+    }
+
+    lengthenWall(wallId, deltaMeters, fromEnd) {
+      if (!wallId && this.ui.selection && this.ui.selection.type === 'wall') {
+        const seg = FC.segmentByKey(this.plan, this.ui.selection.key);
+        if (seg && seg.id) wallId = seg.id;
+      }
+      if (!wallId) return;
+      const wall = this.plan.walls.find((w) => w.id === wallId);
+      if (!wall) return;
+      const currentLen = FC.dist(wall.a, wall.b);
+      const newLen = Math.max(0.2, currentLen + deltaMeters);
+      fromEnd = fromEnd !== undefined ? fromEnd : (this.wallAnchorEnd !== undefined ? this.wallAnchorEnd : 0);
+      this.pushHistory();
+      FC.resizeWall(this.plan, wallId, newLen, fromEnd);
+      this.changed({ rooms: true, furniture: true, save: true });
+      this.toast(`Wall length: ${FC.fmt(newLen, 2)} m (doors stay fixed)`, 'info');
+      if (this.editor) this.editor.draw();
+    }
+
+    startConnectMode(wallId) {
+      if (!wallId && this.ui.selection && this.ui.selection.type === 'wall') {
+        const seg = FC.segmentByKey(this.plan, this.ui.selection.key);
+        if (seg && seg.id) wallId = seg.id;
+      }
+      if (!wallId) return;
+      if (this.editor) {
+        this.editor.startConnectMode(wallId);
       }
     }
 
@@ -972,6 +1315,8 @@
       if (!f) return;
       this.pushHistory();
       f.rot = FC.round((f.rot || 0) + (delta || Math.PI / 2), 3);
+      f.custom = true;
+      this.plan.furniture = this.furniture;
       this.changed({ rooms: false, furniture: false, save: true });
       if (this.viewer) this.viewer.markDirty();
       this.toast('Rotated ' + f.kind, 'info');
@@ -982,6 +1327,7 @@
       if (!sel || sel.type !== 'furniture' || !this.furniture) return;
       this.pushHistory();
       this.furniture = this.furniture.filter((item) => item.id !== sel.id);
+      this.plan.furniture = this.furniture;
       this.clearSelection();
       this.changed({ rooms: false, furniture: false, save: true });
       if (this.viewer) this.viewer.markDirty();
@@ -1010,9 +1356,11 @@
         mat: 'wood',
         variant: '',
         decor: false,
+        custom: true,
       };
       if (!this.furniture) this.furniture = [];
       this.furniture.push(item);
+      this.plan.furniture = this.furniture;
       this.plan.furnished = true;
       this.select({ type: 'furniture', id: item.id });
       this.changed({ rooms: false, furniture: false, save: true });
@@ -1058,10 +1406,11 @@
     }
 
     clearFurniture() {
-      if (!this.plan.furnished) return;
+      if (!this.plan.furnished && (!this.furniture || !this.furniture.length)) return;
       this.pushHistory();
       this.plan.furnished = false;
       this.furniture = [];
+      this.plan.furniture = [];
       this.changed({ rooms: false, furniture: false, save: true });
       if (this.ui) this.ui.renderAll();
       if (this.viewer) this.viewer.markDirty();
@@ -1071,8 +1420,15 @@
     toggleFurniture() {
       this.pushHistory();
       this.plan.furnished = !this.plan.furnished;
-      if (this.plan.furnished) this.recomputeFurniture();
-      else this.furniture = [];
+      if (this.plan.furnished) {
+        if (!this.plan.furniture || !this.plan.furniture.length) {
+          this.recomputeFurniture(true);
+        } else {
+          this.furniture = this.plan.furniture;
+        }
+      } else {
+        this.furniture = [];
+      }
       this.changed({ rooms: false, furniture: false, save: true });
       if (this.ui) this.ui.renderAll();
       if (this.viewer) this.viewer.markDirty();
@@ -1219,7 +1575,15 @@
       this._syncPlan();
       this.rooms = FC.detectRooms(this.plan);
       this.plan.rooms = this._roomMeta();
-      this.furniture = this.plan.furnished ? FC.furnishPlan(this.plan, this.rooms) : [];
+      if (Array.isArray(this.plan.furniture) && this.plan.furniture.length > 0) {
+        this.furniture = this.plan.furniture;
+      } else if (this.plan.furnished) {
+        this.furniture = FC.furnishPlan(this.plan, this.rooms);
+        this.plan.furniture = this.furniture;
+      } else {
+        this.furniture = [];
+        this.plan.furniture = [];
+      }
       this._history = [];
       this._future = [];
       this.ui.view3d = false;

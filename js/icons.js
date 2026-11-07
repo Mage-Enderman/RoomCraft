@@ -56,6 +56,8 @@
     garage: '<path d="M4 19V7l8-4 8 4v12"/><path d="M7 19v-7h10v7"/><path d="M7 15h10M7 12h10"/>',
     magic: '<path d="M19 11l-4-4L3 19l4 4L19 11zM14 2l1.5 3.5L19 7l-3.5 1.5L14 12l-1.5-3.5L9 7l3.5-1.5L14 2z"/>',
     divider: '<path d="M4 12h3M10.5 12h3M17 12h3M12 4v3M12 17v3"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+    merge: '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v9M18 15v-1a4 4 0 0 0-4-4H6"/>',
   };
 
   FC.icon = function (name, cls) {

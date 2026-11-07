@@ -182,6 +182,10 @@
       this.updateStats();
     }
 
+    renderStep() {
+      this.renderSidebar();
+    }
+
     updateHeader() {
       this.els.projectName.textContent = this.app.plan.name || 'Untitled plan';
       this.syncSidebar();
@@ -444,6 +448,43 @@
       const sel = this.app.ui.selection;
       if (!sel) return '';
       const plan = this.app.plan;
+      if (sel.type === 'walls') {
+        const count = (sel.keys || []).length;
+        const allSegs = FC.getSegments(plan);
+        const selectedSegs = (sel.keys || []).map((k) => allSegs.find((s) => s.key === k)).filter(Boolean);
+        const totalLen = selectedSegs.reduce((sum, s) => sum + s.len, 0);
+        return `<div class="sel-card">
+          <div class="sel-head">
+            <div><span class="eyebrow">Multi-selection</span><div class="sel-title">${count} walls selected</div></div>
+            <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
+          </div>
+          <div class="sel-metrics two">
+            <div><b>${count}</b><span>walls selected</span></div>
+            <div><b>${FC.fmt(totalLen, 2)}</b><span>total length · m</span></div>
+          </div>
+          <div class="btn-row two" style="margin-top:10px;">
+            <button class="btn primary sm" data-action="connect-selected-walls">${I('link')} Connect walls</button>
+            <button class="btn soft sm" data-action="merge-selected-walls">${I('merge')} Merge walls</button>
+          </div>
+          <div class="sel-help" style="margin-top:8px;">Connect walls joins endpoints into a draggable junction node. Merge walls combines collinear in-line walls or parallel double walls into a single continuous wall.</div>
+          <button class="danger-link" data-action="delete-selection" style="margin-top:8px;">${I('trash')} Delete selected walls</button>
+        </div>`;
+      }
+      if (sel.type === 'junction') {
+        const j = sel.junction;
+        const refCount = (j.refs || []).length;
+        return `<div class="sel-card">
+          <div class="sel-head">
+            <div><span class="eyebrow">Selected</span><div class="sel-title">Wall Junction</div></div>
+            <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
+          </div>
+          <div class="sel-metrics two">
+            <div><b>${refCount}</b><span>connected walls</span></div>
+            <div><b>${FC.fmt(j.x, 2)}, ${FC.fmt(j.y, 2)}</b><span>position (x, y)</span></div>
+          </div>
+          <div class="sel-help">Drag this junction handle directly on the canvas to slide all connected walls and doors together.</div>
+        </div>`;
+      }
       if (sel.type === 'wall') {
         const seg = FC.getSegments(plan).find((s) => s.key === sel.key);
         if (!seg) return '';
@@ -471,13 +512,30 @@
           <div class="field" style="margin-top:10px;">
             <label class="num-field"><span>Resize length</span><span class="num-wrap"><input type="number" data-wall-len="${seg.id}" min="0.5" max="30" step="0.05" value="${FC.fmt(seg.len, 2)}"><em>m</em></span></label>
           </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:6px;">
+            <span style="font-size:11px;color:var(--ink-3);">Fixed anchor</span>
+            <select data-action="set-wall-anchor" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink-1);">
+              <option value="0" ${ (this.app.wallAnchorEnd !== undefined ? this.app.wallAnchorEnd : 0) === 0 ? 'selected' : '' }>End A (Start fixed)</option>
+              <option value="1" ${ (this.app.wallAnchorEnd !== undefined ? this.app.wallAnchorEnd : 0) === 1 ? 'selected' : '' }>End B (Finish fixed)</option>
+              <option value="2" ${ (this.app.wallAnchorEnd !== undefined ? this.app.wallAnchorEnd : 0) === 2 ? 'selected' : '' }>Center</option>
+            </select>
+          </div>
+          <div class="btn-row" style="margin-top:6px; display:flex; gap:6px;">
+            <button class="btn soft sm" style="flex:1" data-action="wall-lengthen" data-delta="0.5" data-wall="${seg.id}">+0.5 m</button>
+            <button class="btn soft sm" style="flex:1" data-action="wall-lengthen" data-delta="1.0" data-wall="${seg.id}">+1.0 m</button>
+            ${!seg.boundary ? `<button class="btn soft sm" style="flex:1.5" data-action="wall-extend-ray" data-wall="${seg.id}" title="Extend wall along its direction to intersect the nearest wall">${I('expand')} Extend to wall</button>` : ''}
+          </div>
           <div class="btn-row two" style="margin-top:8px;">
             <button class="btn soft sm" data-action="wall-add-door" data-wall="${seg.id}">${I('door')} Add door</button>
             <button class="btn soft sm" data-action="wall-add-window" data-wall="${seg.id}">${I('window')} Add window</button>
           </div>
+          ${!seg.boundary ? `<div class="btn-row two" style="margin-top:6px;">
+            <button class="btn soft sm" data-action="wall-connect-mode" data-wall="${seg.id}" title="Click another wall to connect with this one">${I('link')} Connect wall...</button>
+            <button class="btn soft sm" data-action="wall-connect-nearest" data-wall="${seg.id}" title="Snap and join with the closest wall or corner">${I('sparkles')} Connect nearest</button>
+          </div>` : ''}
           ${!seg.boundary ? `<button class="btn soft sm" style="margin-top:6px;width:100%" data-action="toggle-wall-virtual" data-wall="${seg.id}">${seg.wall && seg.wall.virtual ? `${I('wall')} Convert to solid wall` : `${I('divider')} Convert to room divider (virtual)`}</button>` : ''}
           ${!seg.boundary ? `<button class="btn soft sm" style="margin-top:6px;width:100%" data-action="wall-split" data-wall="${seg.id}">${I('sliders')} Split wall into two</button>` : ''}
-          <div class="sel-help" style="margin-top:8px;">${seg.boundary ? 'Drag the wall or its corners in Outline mode to reshape it.' : 'Drag the wall to move it, drag junction nodes to move connected walls together, or type an exact length above.'}</div>
+          <div class="sel-help" style="margin-top:8px;">${seg.boundary ? 'Drag the wall or its corners in Outline mode to reshape it.' : 'Drag orange handles on wall tips to extend length (doors stay fixed). Drag wall body to slide with magnetic snap to walls and doors.'}</div>
           ${!seg.boundary ? `<button class="danger-link" data-action="delete-selection">${I('trash')} Delete wall</button>` : ''}
         </div>`;
       }
@@ -570,9 +628,10 @@
         const room = this.app.rooms.find((r) => r.id === sel.id);
         if (!room) return '';
         const t = FC.roomTypes[room.type] || FC.roomTypes.living;
+        const isManual = this.app.plan.autoDetectRooms === false || room.isManual;
         return `<div class="sel-card">
           <div class="sel-head">
-            <div><span class="eyebrow">Selected Room</span><div class="sel-title">${esc(room.name || t.label)}</div></div>
+            <div><span class="eyebrow">${isManual ? 'Manual Room (Locked)' : 'Detected Room'}</span><div class="sel-title">${esc(room.name || t.label)}</div></div>
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="sel-metrics two">
@@ -668,16 +727,61 @@
     }
 
     roomsStepHTML() {
-      const rooms = this.app.rooms;
+      const rooms = this.app.rooms || [];
       const tool = this.app.ui.tool;
-      const selectedRoom = this.app.ui.selection && this.app.ui.selection.type === 'room' ? this.app.rooms.find((r) => r.id === this.app.ui.selection.id) : null;
+      const isAuto = this.app.plan.autoDetectRooms !== false;
+      const preview = this.app.detectedRoomsPreview;
+      const selectedRoom = this.app.ui.selection && this.app.ui.selection.type === 'room' ? rooms.find((r) => r.id === this.app.ui.selection.id) : null;
+
       return `<section class="panel-block">
-        ${this.moduleHead('Rooms', rooms.length + ' detected')}
+        ${this.moduleHead('Rooms', rooms.length + (isAuto ? ' detected' : ' assigned (manual)'))}
+
+        <div class="room-mode-banner ${isAuto ? 'auto' : 'manual'}" style="margin-bottom:10px;">
+          <div class="mode-info">
+            <span class="mode-pill ${isAuto ? 'auto' : 'manual'}"><span class="pill-dot"></span>${isAuto ? 'Auto-detect: Active' : 'Manual Mode'}</span>
+            <span class="mode-sub">${isAuto ? 'Rooms update on wall edits' : 'Auto-detect paused; labels locked'}</span>
+          </div>
+          <button class="btn ${isAuto ? 'soft' : 'primary'} xs" data-action="toggle-auto-detect" title="${isAuto ? 'Pause automatic room detection to keep manual adjustments' : 'Turn on automatic room detection from current walls'}">
+            ${isAuto ? 'Pause auto' : `${I('rotate')} Auto-detect`}
+          </button>
+        </div>
+
+        <div class="preview-toggle-bar" style="margin-bottom:12px;">
+          <button class="btn soft sm ${preview ? 'active' : ''}" style="width:100%;justify-content:center;" data-action="toggle-room-preview" title="Show what rooms the algorithm detects from closed walls without changing your manual assignments">
+            ${I('eye')} <span>${preview ? 'Hide detected preview' : 'Show detected rooms'}</span>
+          </button>
+        </div>
+
+        ${preview ? `<div class="room-preview-box">
+          <div class="preview-box-head">
+            <div>
+              <span class="eyebrow" style="color:var(--primary,#7061ff);">Detection Preview</span>
+              <div class="preview-title">Found ${preview.length} room${preview.length === 1 ? '' : 's'} from walls</div>
+            </div>
+            <button class="icon-btn soft xs" data-action="dismiss-room-preview" title="Dismiss preview">${I('close')}</button>
+          </div>
+          <p class="helper tight" style="margin:4px 0 8px 0;">Algorithm suggestions displayed on canvas. Manual rooms are not overridden.</p>
+          <div class="btn-row two" style="margin-bottom:8px;">
+            <button class="btn primary sm" data-action="apply-detected-rooms" title="Replace current rooms with detected rooms and enable auto-detect">${I('check')} Apply All</button>
+            <button class="btn soft sm" data-action="dismiss-room-preview">Dismiss</button>
+          </div>
+          ${preview.length ? `<div class="room-list preview-list">
+            ${preview.map((cand) => {
+              const t = FC.roomTypes[cand.type] || FC.roomTypes.living;
+              return `<div class="room-row preview-row">
+                <span class="room-dot" style="background:${t.color}"></span>
+                <span class="room-main"><b>${esc(cand.name || t.label)}</b><span>${FC.fmt(cand.area, 1)} m²</span></span>
+                <button class="btn soft xs adopt-btn" data-action="adopt-detected-room" data-candidate="${cand.id}" title="Add this detected room to your manual room layout">+ Adopt</button>
+              </div>`;
+            }).join('')}
+          </div>` : `<p class="helper tight" style="color:#ef4444;">No enclosed spaces formed by current walls.</p>`}
+        </div>` : ''}
+
         <div class="tool-chips" style="margin-bottom:12px;">
           <button class="tool-chip ${tool === 'room' ? 'active' : ''}" data-action="tool" data-tool="room" title="Click corners on canvas to manually trace a custom room polygon">${I('layout')}<span>Draw room</span></button>
           <button class="tool-chip ${tool === 'divider' ? 'active' : ''}" data-action="tool" data-tool="divider" title="Draw an invisible partition line to separate open-concept spaces">${I('divider')}<span>Room divider</span></button>
         </div>
-        <p class="helper tight">Rooms are found automatically. Use <b>Draw room</b> to trace custom spaces, or <b>Room divider</b> to partition open spaces like Kitchen, Dining, and Great Room without solid 3D walls.</p>
+        <p class="helper tight">Rooms can be auto-detected or manually adjusted. Use <b>Draw room</b> to trace custom spaces, or <b>Room divider</b> to partition open-concept spaces.</p>
         ${rooms.length ? `<div class="room-list" style="margin-top:10px;">
           ${rooms
             .map((r) => {
@@ -974,7 +1078,8 @@
         this.ensureHistory(el);
         const value = parseFloat(el.value);
         if (isFinite(value) && value > 0.1) {
-          this.app.resizeWall(el.dataset.wallLen, value);
+          const fromEnd = this.app.wallAnchorEnd !== undefined ? this.app.wallAnchorEnd : 0;
+          this.app.resizeWall(el.dataset.wallLen, value, fromEnd);
         }
         return;
       }
@@ -994,6 +1099,10 @@
     }
 
     onChange(e) {
+      if (e.target.dataset && e.target.dataset.action === 'set-wall-anchor') {
+        this.app.wallAnchorEnd = parseInt(e.target.value, 10);
+        return;
+      }
       if (!e.target.matches || !e.target.matches('input')) return;
       this._activeSetting = null;
       this.app.saveSoon();
@@ -1081,6 +1190,21 @@
         case 'room-type':
           app.setRoomType(el.dataset.room, el.dataset.type);
           break;
+        case 'toggle-auto-detect':
+          app.toggleAutoDetectRooms();
+          break;
+        case 'toggle-room-preview':
+          app.toggleDetectedRoomsPreview();
+          break;
+        case 'dismiss-room-preview':
+          app.dismissDetectedRoomsPreview();
+          break;
+        case 'apply-detected-rooms':
+          app.applyDetectedRooms(true);
+          break;
+        case 'adopt-detected-room':
+          app.adoptDetectedRoom(el.dataset.candidate);
+          break;
         case 'focus-room':
           app.focusRoom(el.dataset.room);
           break;
@@ -1111,6 +1235,25 @@
           break;
         case 'wall-split':
           app.splitWallAt(el.dataset.wall);
+          break;
+        case 'connect-selected-walls':
+          app.connectWalls();
+          break;
+        case 'merge-selected-walls':
+          app.mergeWalls();
+          break;
+        case 'wall-extend-ray':
+          app.extendWallToBoundary(el.dataset.wall);
+          break;
+        case 'wall-lengthen':
+          app.lengthenWall(el.dataset.wall, parseFloat(el.dataset.delta) || 0.5);
+          this.renderSidebar();
+          break;
+        case 'wall-connect-mode':
+          app.startConnectMode(el.dataset.wall);
+          break;
+        case 'wall-connect-nearest':
+          app.connectWallToNearest(el.dataset.wall);
           break;
         case 'merge-parallel-wall':
           app.mergeSelectedWallWithParallel(el.dataset.target);

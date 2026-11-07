@@ -364,6 +364,20 @@
         cyl(g, 0.15, 0.17, 0.03, dark, 0, 0.015, 0);
         break;
       }
+      case 'artwork': {
+        const frameCol = pal.dark || '#2b2b2b';
+        // Outer picture frame
+        box(g, w, item.h, 0.035, material(frameCol, 0.6), 0, elev + item.h / 2, 0);
+        // Canvas with art
+        const canvasMat = material(pal.accent || '#8a5a36', 0.85, 0.05, {
+          color: new THREE.Color(item.variant === 'warm' ? '#c89666' : (item.variant === 'cool' ? '#5a8276' : '#bf616a'))
+        });
+        box(g, w - 0.08, item.h - 0.08, 0.012, canvasMat, 0, elev + item.h / 2, 0.015);
+        // Inner artistic abstract accents
+        box(g, (w - 0.08) * 0.5, (item.h - 0.08) * 0.35, 0.004, material(pal.linen, 0.95), 0.04, elev + item.h / 2 + 0.05, 0.022);
+        box(g, (w - 0.08) * 0.28, 0.025, 0.004, material(frameCol, 0.8), -0.06, elev + item.h / 2 - 0.06, 0.023);
+        break;
+      }
       default:
         box(g, w, Math.min(item.h, 0.9), d, main, 0, Math.min(item.h, 0.9) / 2, 0);
         break;

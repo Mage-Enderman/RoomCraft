@@ -124,35 +124,53 @@
 
       if (op.kind === 'door') {
         // Draw 90-degree swing arc and leaf line
-        const normalX = -sin;
-        const normalY = cos;
-        const leafEndX = p1x + normalX * pl.width;
-        const leafEndY = p1y + normalY * pl.width;
+        const isRight = op.hinge === 'right';
+        const swingSign = op.swingSide === -1 ? -1 : 1;
+        const normalX = -sin * swingSign;
+        const normalY = cos * swingSign;
+
+        const hx = isRight ? p2x : p1x;
+        const hy = isRight ? p2y : p1y;
+        const closedX = isRight ? p1x : p2x;
+        const closedY = isRight ? p1y : p2y;
+
+        const leafEndX = hx + normalX * pl.width;
+        const leafEndY = hy + normalY * pl.width;
 
         // Door leaf
         w(0, 'LINE');
         w(8, layer);
-        w(10, p1x.toFixed(4));
-        w(20, (-p1y).toFixed(4));
+        w(10, hx.toFixed(4));
+        w(20, (-hy).toFixed(4));
         w(30, 0.0);
         w(11, leafEndX.toFixed(4));
         w(21, (-leafEndY).toFixed(4));
         w(31, 0.0);
 
-        // Door swing arc
-        let startAngle = (Math.atan2(-(-p1y + leafEndY), leafEndX - p1x) * 180) / Math.PI;
-        let endAngle = (Math.atan2(-(-p1y + p2y), p2x - p1x) * 180) / Math.PI;
-        if (startAngle < 0) startAngle += 360;
-        if (endAngle < 0) endAngle += 360;
+        // Door swing arc (CAD Y is inverted: y_cad = -y)
+        const vClosedX = closedX - hx;
+        const vClosedY = -closedY - (-hy);
+        const vOpenX = leafEndX - hx;
+        const vOpenY = -leafEndY - (-hy);
+
+        let aClosed = (Math.atan2(vClosedY, vClosedX) * 180) / Math.PI;
+        let aOpen = (Math.atan2(vOpenY, vOpenX) * 180) / Math.PI;
+        if (aClosed < 0) aClosed += 360;
+        if (aOpen < 0) aOpen += 360;
+
+        // DXF arcs sweep counter-clockwise from group 50 to 51
+        const cross = vClosedX * vOpenY - vClosedY * vOpenX;
+        const startAngle = cross > 0 ? aClosed : aOpen;
+        const endAngle = cross > 0 ? aOpen : aClosed;
 
         w(0, 'ARC');
         w(8, layer);
-        w(10, p1x.toFixed(4));
-        w(20, (-p1y).toFixed(4));
+        w(10, hx.toFixed(4));
+        w(20, (-hy).toFixed(4));
         w(30, 0.0);
         w(40, pl.width.toFixed(4)); // Radius
-        w(50, Math.min(startAngle, endAngle).toFixed(2));
-        w(51, Math.max(startAngle, endAngle).toFixed(2));
+        w(50, startAngle.toFixed(2));
+        w(51, endAngle.toFixed(2));
       } else if (op.kind === 'window') {
         // Double lines for window glazing
         const offset = 0.04;
@@ -202,7 +220,9 @@
     });
 
     // 5. Furniture
-    const furniture = FC.furnishPlan ? FC.furnishPlan(plan, rooms) : [];
+    const furniture = (plan.furniture && plan.furniture.length)
+      ? plan.furniture
+      : (FC.furnishPlan ? FC.furnishPlan(plan, rooms) : []);
     furniture.forEach((f) => {
       // Draw rectangular boundary for furniture
       const hw = f.w / 2;
