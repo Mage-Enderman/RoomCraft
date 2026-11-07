@@ -565,7 +565,7 @@
     const removed = [];
     plan.openings = (plan.openings || []).filter((op) => {
       let seg = segs.find((s) => s.key === op.hostKey);
-      if (!seg || op.offset < 0 || op.offset > seg.len) {
+      if (!seg) {
         const pos = FC.openingPlacement(plan, op, segs);
         const near = pos ? FC.nearestWall(plan, { x: pos.x, y: pos.y }, 0.9) : null;
         if (!near) {
@@ -576,23 +576,133 @@
         op.offset = near.offset;
         seg = near.seg;
       }
-      if (op.offset < 0.05 || op.offset > seg.len - 0.05) {
-        let px;
-        let py;
-        const old = FC.openingPlacement(plan, op, segs);
-        if (old) {
-          px = old.x;
-          py = old.y;
-          const near = FC.nearestWall(plan, { x: px, y: py }, 0.9);
-          if (near) {
-            op.hostKey = near.seg.key;
-            op.offset = near.offset;
-          }
-        }
-      }
+      const w = op.width || 0.9;
+      op.offset = clamp(op.offset, w / 2 + 0.02, seg.len - w / 2 - 0.02);
       return true;
     });
+
+    // De-duplicate and resolve overlaps on the same wall segment
+    const byHost = new Map();
+    plan.openings.forEach((op) => {
+      if (!byHost.has(op.hostKey)) byHost.set(op.hostKey, []);
+      byHost.get(op.hostKey).push(op);
+    });
+
+    const keptOpenings = [];
+    byHost.forEach((ops, hostKey) => {
+      if (ops.length === 1) {
+        keptOpenings.push(ops[0]);
+        return;
+      }
+      ops.sort((a, b) => a.offset - b.offset);
+      const filtered = [];
+      for (let i = 0; i < ops.length; i++) {
+        const cur = ops[i];
+        if (filtered.length > 0) {
+          const prev = filtered[filtered.length - 1];
+          const minCenterDist = (cur.width + prev.width) / 2;
+          const centerDist = cur.offset - prev.offset;
+          if (centerDist < 0.25) {
+            // Duplicate opening detected, skip
+            continue;
+          } else if (centerDist < minCenterDist + 0.04) {
+            // Overlapping adjacent openings: separate them
+            const seg = segs.find((s) => s.key === hostKey);
+            const neededShift = (minCenterDist + 0.04 - centerDist) / 2;
+            prev.offset = Math.max(prev.width / 2 + 0.02, prev.offset - neededShift);
+            cur.offset = Math.min((seg ? seg.len : 999) - cur.width / 2 - 0.02, cur.offset + neededShift);
+          }
+        }
+        filtered.push(cur);
+      }
+      filtered.forEach((op) => keptOpenings.push(op));
+    });
+
+    plan.openings = keptOpenings;
     return removed;
+  };
+
+  FC.rectifyWalls = function (plan) {
+    if (!plan || !plan.walls) return;
+
+    for (let pass = 0; pass < 2; pass++) {
+      plan.walls.forEach((w) => {
+        const dx = w.b.x - w.a.x;
+        const dy = w.b.y - w.a.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 0.04) return;
+        const deg = (((Math.atan2(dy, dx) * 180) / Math.PI % 180) + 180) % 180;
+
+        if (deg < 6 || deg > 174 || Math.abs(dy) < 0.08) {
+          const avgY = FC.round((w.a.y + w.b.y) / 2, 3);
+          w.a.y = avgY;
+          w.b.y = avgY;
+        } else if (Math.abs(deg - 90) < 6 || Math.abs(dx) < 0.08) {
+          const avgX = FC.round((w.a.x + w.b.x) / 2, 3);
+          w.a.x = avgX;
+          w.b.x = avgX;
+        } else if (Math.abs(deg - 45) < 5 || Math.abs(deg - 135) < 5) {
+          const signX = w.b.x - w.a.x >= 0 ? 1 : -1;
+          const signY = w.b.y - w.a.y >= 0 ? 1 : -1;
+          const avgD = (Math.abs(dx) + Math.abs(dy)) / 2;
+          w.b.x = FC.round(w.a.x + signX * avgD, 3);
+          w.b.y = FC.round(w.a.y + signY * avgD, 3);
+        }
+      });
+
+      const weldDist = 0.08;
+      for (let i = 0; i < plan.walls.length; i++) {
+        const w1 = plan.walls[i];
+        const isHoriz1 = w1.a.y === w1.b.y;
+        const isVert1 = w1.a.x === w1.b.x;
+
+        for (let j = i + 1; j < plan.walls.length; j++) {
+          const w2 = plan.walls[j];
+          const isHoriz2 = w2.a.y === w2.b.y;
+          const isVert2 = w2.a.x === w2.b.x;
+
+          ['a', 'b'].forEach((k1) => {
+            ['a', 'b'].forEach((k2) => {
+              if (Math.hypot(w1[k1].x - w2[k2].x, w1[k1].y - w2[k2].y) <= weldDist) {
+                if (isHoriz1 && isVert2) {
+                  w1[k1].x = w2[k2].x;
+                  w2[k2].y = w1[k1].y;
+                } else if (isVert1 && isHoriz2) {
+                  w1[k1].y = w2[k2].y;
+                  w2[k2].x = w1[k1].x;
+                } else if (isHoriz1 && isHoriz2) {
+                  const avgY = FC.round((w1[k1].y + w2[k2].y) / 2, 3);
+                  w1.a.y = w1.b.y = w2.a.y = w2.b.y = avgY;
+                  const midX = FC.round((w1[k1].x + w2[k2].x) / 2, 3);
+                  w1[k1].x = w2[k2].x = midX;
+                } else if (isVert1 && isVert2) {
+                  const avgX = FC.round((w1[k1].x + w2[k2].x) / 2, 3);
+                  w1.a.x = w1.b.x = w2.a.x = w2.b.x = avgX;
+                  const midY = FC.round((w1[k1].y + w2[k2].y) / 2, 3);
+                  w1[k1].y = w2[k2].y = midY;
+                } else {
+                  const midX = FC.round((w1[k1].x + w2[k2].x) / 2, 3);
+                  const midY = FC.round((w1[k1].y + w2[k2].y) / 2, 3);
+                  w1[k1].x = w2[k2].x = midX;
+                  w1[k1].y = w2[k2].y = midY;
+                }
+              }
+            });
+          });
+        }
+      }
+    }
+
+    plan.walls.forEach((w) => {
+      const deg = (((Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x) * 180) / Math.PI % 180) + 180) % 180;
+      if (deg < 1 || deg > 179) {
+        w.b.y = w.a.y;
+      } else if (Math.abs(deg - 90) < 1) {
+        w.b.x = w.a.x;
+      }
+    });
+
+    plan.walls = plan.walls.filter((w) => Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) >= 0.05);
   };
 
   /* ------------------------------------------------------------------ */
@@ -807,6 +917,11 @@
       const avgY = FC.round(sumY / members.length, 3);
       members.forEach((p) => { p.x = avgX; p.y = avgY; });
     });
+
+    // 5. Rectify walls so that healing never leaves walls crooked or skewed off orthogonal axes
+    if (FC.rectifyWalls) {
+      FC.rectifyWalls(plan);
+    }
   };
 
   FC.closeWallGaps = function (plan, maxGap) {
@@ -1038,6 +1153,9 @@
       } else if (!used.bedroom2 && r.area > 8) {
         r.type = 'bedroom';
         used.bedroom2 = 1;
+      } else if (!used.bedroom3 && r.area > 10 && rooms.length >= 6) {
+        r.type = 'bedroom';
+        used.bedroom3 = 1;
       } else if (!used.office && r.area > 7) {
         r.type = 'office';
         used.office = 1;
@@ -1162,12 +1280,223 @@
     tableSmall: 0.52,
   };
 
+  /* ------------------------------------------------------------------ */
+  /* Furniture Placement & Collision Engine                             */
+  /* ------------------------------------------------------------------ */
+
+  FC.itemCorners = function (item, margin) {
+    margin = margin || 0;
+    const hw = item.w / 2 + margin;
+    const hd = item.d / 2 + margin;
+    const rot = item.rot || 0;
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    return [
+      { x: item.x - hw * cos + hd * sin, y: item.y - hw * sin - hd * cos },
+      { x: item.x + hw * cos + hd * sin, y: item.y + hw * sin - hd * cos },
+      { x: item.x + hw * cos - hd * sin, y: item.y + hw * sin + hd * cos },
+      { x: item.x - hw * cos - hd * sin, y: item.y - hw * sin + hd * cos },
+    ];
+  };
+
+  FC.itemInPolygon = function (item, polygon, margin) {
+    if (!polygon || polygon.length < 3) return false;
+    if (!FC.pointInPolygon({ x: item.x, y: item.y }, polygon)) return false;
+    const corners = FC.itemCorners(item, margin || 0.02);
+    for (let i = 0; i < 4; i++) {
+      if (!FC.pointInPolygon(corners[i], polygon)) return false;
+    }
+    const n = polygon.length;
+    for (let i = 0; i < 4; i++) {
+      const c1 = corners[i];
+      const c2 = corners[(i + 1) % 4];
+      for (let j = 0; j < n; j++) {
+        const p1 = polygon[j];
+        const p2 = polygon[(j + 1) % n];
+        if (FC.segmentIntersection(c1, c2, p1, p2)) return false;
+      }
+    }
+    return true;
+  };
+
+  FC.polygonsIntersect = function (polyA, polyB) {
+    const polys = [polyA, polyB];
+    for (let p = 0; p < 2; p++) {
+      const poly = polys[p];
+      for (let i = 0; i < poly.length; i++) {
+        const p1 = poly[i];
+        const p2 = poly[(i + 1) % poly.length];
+        const nx = -(p2.y - p1.y);
+        const ny = p2.x - p1.x;
+        let minA = Infinity, maxA = -Infinity;
+        for (let k = 0; k < polyA.length; k++) {
+          const dot = polyA[k].x * nx + polyA[k].y * ny;
+          if (dot < minA) minA = dot;
+          if (dot > maxA) maxA = dot;
+        }
+        let minB = Infinity, maxB = -Infinity;
+        for (let k = 0; k < polyB.length; k++) {
+          const dot = polyB[k].x * nx + polyB[k].y * ny;
+          if (dot < minB) minB = dot;
+          if (dot > maxB) maxB = dot;
+        }
+        if (maxA <= minB + 1e-4 || maxB <= minA + 1e-4) return false;
+      }
+    }
+    return true;
+  };
+
+  FC.isNonSolid = function (item) {
+    return item.kind === 'rug' || item.kind === 'bathMat' || item.kind === 'pendant';
+  };
+
+  FC.itemsOverlap = function (itemA, itemB, margin) {
+    if (FC.isNonSolid(itemA) || FC.isNonSolid(itemB)) return false;
+    const elevA = itemA.elev || 0;
+    const elevB = itemB.elev || 0;
+    const hA = itemA.h || 0.6;
+    const hB = itemB.h || 0.6;
+    if (elevA + hA <= elevB + 0.05 || elevB + hB <= elevA + 0.05) return false;
+    if ((itemA.kind === 'chair' && (itemB.kind === 'diningTable' || itemB.kind === 'desk')) ||
+        (itemB.kind === 'chair' && (itemA.kind === 'diningTable' || itemA.kind === 'desk'))) {
+      return false;
+    }
+    const cornersA = FC.itemCorners(itemA, margin || 0.02);
+    const cornersB = FC.itemCorners(itemB, margin || 0.02);
+    return FC.polygonsIntersect(cornersA, cornersB);
+  };
+
+  FC.itemBlocksDoor = function (item, doorZones) {
+    if (FC.isNonSolid(item)) return false;
+    const corners = FC.itemCorners(item, 0.02);
+    for (let d = 0; d < doorZones.length; d++) {
+      const dz = doorZones[d];
+      if (Math.hypot(item.x - dz.x, item.y - dz.y) < dz.radius) return true;
+      for (let i = 0; i < 4; i++) {
+        if (Math.hypot(corners[i].x - dz.x, corners[i].y - dz.y) < dz.radius) return true;
+      }
+      for (let i = 0; i < 4; i++) {
+        const c1 = corners[i];
+        const c2 = corners[(i + 1) % 4];
+        const h = FC.pointSegment({ x: dz.x, y: dz.y }, c1, c2);
+        if (h.dist < dz.radius) return true;
+      }
+    }
+    return false;
+  };
+
+  FC.itemIntersectsWall = function (item, wallSegments) {
+    if (FC.isNonSolid(item)) return false;
+    const corners = FC.itemCorners(item, 0.02);
+    for (let i = 0; i < 4; i++) {
+      const c1 = corners[i];
+      const c2 = corners[(i + 1) % 4];
+      for (let s = 0; s < wallSegments.length; s++) {
+        const seg = wallSegments[s];
+        if (FC.segmentIntersection(c1, c2, seg.a, seg.b)) return true;
+      }
+    }
+    return false;
+  };
+
+  FC.findPrimaryZone = function (poly, bounds) {
+    const b = bounds || FC.polygonBounds(poly);
+    const area = Math.abs(FC.polygonArea(poly));
+    const bArea = (b.x1 - b.x0) * (b.y1 - b.y0);
+    if (bArea > 0 && area / bArea > 0.88) {
+      return b;
+    }
+    let best = { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, area: 0, w: b.w, d: b.d, cx: b.cx, cy: b.cy };
+    const step = Math.max(0.35, Math.min(b.w, b.d) / 10);
+    const xs = [];
+    const ys = [];
+    for (let x = b.x0 + 0.15; x <= b.x1 - 0.15; x += step) xs.push(x);
+    for (let y = b.y0 + 0.15; y <= b.y1 - 0.15; y += step) ys.push(y);
+    const n = poly.length;
+
+    for (let i = 0; i < xs.length; i++) {
+      const x0 = xs[i];
+      for (let j = 0; j < ys.length; j++) {
+        const y0 = ys[j];
+        if (!FC.pointInPolygon({ x: x0 + 0.08, y: y0 + 0.08 }, poly)) continue;
+        for (let k = i + 1; k < xs.length; k++) {
+          const x1 = xs[k];
+          for (let l = j + 1; l < ys.length; l++) {
+            const y1 = ys[l];
+            const rArea = (x1 - x0) * (y1 - y0);
+            if (rArea <= best.area) continue;
+
+            const corners = [
+              { x: x0, y: y0 }, { x: x1, y: y0 },
+              { x: x1, y: y1 }, { x: x0, y: y1 },
+              { x: (x0 + x1) / 2, y: (y0 + y1) / 2 }
+            ];
+            let ok = true;
+            for (let p = 0; p < 5; p++) {
+              if (!FC.pointInPolygon(corners[p], poly)) { ok = false; break; }
+            }
+            if (ok) {
+              for (let c = 0; c < 4 && ok; c++) {
+                const cA = corners[c];
+                const cB = corners[(c + 1) % 4];
+                for (let s = 0; s < n; s++) {
+                  if (FC.segmentIntersection(cA, cB, poly[s], poly[(s + 1) % n])) {
+                    ok = false;
+                    break;
+                  }
+                }
+              }
+            }
+            if (ok) {
+              best = { x0, y0, x1, y1, area: rArea, w: x1 - x0, d: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
+            }
+          }
+        }
+      }
+    }
+    return best.area > 0 ? best : b;
+  };
+
+  FC.canPlaceFurniture = function (plan, room, item, placedItems, doorZones, wallSegments) {
+    if (room && room.polygon && !FC.itemInPolygon(item, room.polygon, 0.02)) {
+      return false;
+    }
+    if (doorZones && FC.itemBlocksDoor(item, doorZones)) {
+      return false;
+    }
+    if (wallSegments && FC.itemIntersectsWall(item, wallSegments)) {
+      return false;
+    }
+    if (placedItems) {
+      for (let i = 0; i < placedItems.length; i++) {
+        if (FC.itemsOverlap(item, placedItems[i])) return false;
+      }
+    }
+    return true;
+  };
+
   FC.furnishPlan = function (plan, rooms) {
     if (!plan.furnished) return [];
     const density = plan.density == null ? 1 : plan.density;
     const items = [];
     let count = 0;
     const globalVar = parseInt(plan.layoutVariation, 10) || 0;
+
+    const wallSegments = FC.getSegments(plan);
+    const doors = (plan.openings || []).filter((o) => o.kind === 'door');
+    const doorZones = [];
+    doors.forEach((d) => {
+      const pl = FC.openingPlacement(plan, d, wallSegments);
+      if (pl) {
+        let r = 0.8;
+        if (d.style === 'sliding' || d.style === 'bifold') {
+          r = 0.65;
+        } else {
+          r = Math.min(0.85, Math.max(0.65, (pl.width || 0.8) * 0.85));
+        }
+        doorZones.push({ x: pl.x, y: pl.y, radius: r, door: d });
+      }
+    });
 
     function add(room, kind, x, y, w, d, rot, opts) {
       opts = opts || {};
@@ -1186,18 +1515,44 @@
         variant: opts.variant || '',
         decor: !!opts.decor,
       };
-      if (item.decor && density < 0.7) return item;
-      items.push(item);
-      return item;
+      if (item.decor && density < 0.7) return null;
+
+      // Primary check
+      if (FC.canPlaceFurniture(plan, room, item, items, doorZones, wallSegments)) {
+        items.push(item);
+        return item;
+      }
+
+      // Try small positional nudges if allowed
+      if (opts.canNudge !== false) {
+        const deltas = [
+          { dx: 0, dy: 0.2 }, { dx: 0, dy: -0.2 },
+          { dx: 0.2, dy: 0 }, { dx: -0.2, dy: 0 },
+          { dx: 0, dy: 0.4 }, { dx: 0, dy: -0.4 },
+          { dx: 0.4, dy: 0 }, { dx: -0.4, dy: 0 }
+        ];
+        for (let i = 0; i < deltas.length; i++) {
+          const testItem = Object.assign({}, item, {
+            x: FC.round(x + deltas[i].dx, 3),
+            y: FC.round(y + deltas[i].dy, 3)
+          });
+          if (FC.canPlaceFurniture(plan, room, testItem, items, doorZones, wallSegments)) {
+            items.push(testItem);
+            return testItem;
+          }
+        }
+      }
+
+      return null;
     }
 
     rooms.forEach((room, roomIdx) => {
-      const b = room.bounds || FC.polygonBounds(room.polygon);
-      const pad = 0.14;
-      const x0 = b.x0 + pad;
-      const y0 = b.y0 + pad;
-      const x1 = b.x1 - pad;
-      const y1 = b.y1 - pad;
+      const zone = FC.findPrimaryZone(room.polygon, room.bounds);
+      const pad = 0.16;
+      const x0 = zone.x0 + pad;
+      const y0 = zone.y0 + pad;
+      const x1 = zone.x1 - pad;
+      const y1 = zone.y1 - pad;
       const W = Math.max(0.6, x1 - x0);
       const D = Math.max(0.6, y1 - y0);
       const cx = (x0 + x1) / 2;
@@ -1209,257 +1564,118 @@
         const bedW = clamp(W * 0.44, 1.3, 1.9);
         const bedD = clamp(D * 0.48, 1.85, 2.1);
 
-        if (variant === 0) {
-          // North headboard setup
-          const bedX = x0 + Math.min(W - bedW / 2 - 0.15, W * 0.45);
-          const bedY = y0 + bedD / 2 + 0.1;
-          add(room, 'bed', bedX, bedY, bedW, bedD, 0, { mat: 'wood' });
-          add(room, 'nightstand', bedX - bedW / 2 - 0.26, y0 + 0.32, 0.44, 0.4, 0, { mat: 'wood' });
-          if (bedX + bedW / 2 + 0.5 < x1) add(room, 'nightstand', bedX + bedW / 2 + 0.26, y0 + 0.32, 0.44, 0.4, 0, { mat: 'wood' });
-          const wardrobeW = Math.min(2.2, W * 0.52);
-          add(room, 'wardrobe', x0 + wardrobeW / 2 + 0.05, y1 - 0.32, wardrobeW, 0.62, Math.PI, { mat: 'cabinet' });
-          if (W > 3.2 && D > 3.2) add(room, 'rug', bedX, Math.min(y1 - 0.8, y0 + bedD + 0.75), Math.min(2.4, W * 0.6), 0.95, 0, { mat: 'rug', decor: true });
-          if (density > 1.05) add(room, 'plant', x1 - 0.32, y1 - 0.32, 0.5, 0.5, 0, { mat: 'plant', decor: true });
-        } else if (variant === 1) {
-          // West headboard setup with side desk
-          const bedX = x0 + bedD / 2 + 0.1;
-          const bedY = cy;
-          add(room, 'bed', bedX, bedY, bedD, bedW, Math.PI / 2, { mat: 'wood' });
-          add(room, 'nightstand', x0 + 0.3, bedY - bedW / 2 - 0.26, 0.4, 0.44, Math.PI / 2, { mat: 'wood' });
-          add(room, 'nightstand', x0 + 0.3, bedY + bedW / 2 + 0.26, 0.4, 0.44, Math.PI / 2, { mat: 'wood' });
-          const wardrobeW = Math.min(2.0, D * 0.5);
-          add(room, 'wardrobe', x1 - 0.32, cy, 0.62, wardrobeW, -Math.PI / 2, { mat: 'cabinet' });
-          if (W > 3.2) {
-            add(room, 'desk', cx + 0.3, y0 + 0.38, Math.min(1.4, W * 0.35), 0.55, 0, { mat: 'wood' });
-            add(room, 'chair', cx + 0.3, y0 + 0.85, 0.45, 0.45, Math.PI, { mat: 'fabric' });
+        let placedBed = null;
+        const orientations = variant === 0 ? [0, 1, 2] : (variant === 1 ? [1, 2, 0] : [2, 0, 1]);
+        for (let o = 0; o < orientations.length && !placedBed; o++) {
+          const ori = orientations[o];
+          if (ori === 0) {
+            const bedX = cx;
+            const bedY = y0 + bedD / 2 + 0.1;
+            placedBed = add(room, 'bed', bedX, bedY, bedW, bedD, 0, { mat: 'wood' });
+            if (placedBed) {
+              add(room, 'nightstand', placedBed.x - bedW / 2 - 0.28, y0 + 0.32, 0.44, 0.4, 0, { mat: 'wood' });
+              add(room, 'nightstand', placedBed.x + bedW / 2 + 0.28, y0 + 0.32, 0.44, 0.4, 0, { mat: 'wood' });
+              const wardrobeW = Math.min(2.0, W * 0.48);
+              add(room, 'wardrobe', cx, y1 - 0.32, wardrobeW, 0.6, Math.PI, { mat: 'cabinet' });
+              if (W > 3.0 && D > 3.0) add(room, 'rug', cx, Math.min(y1 - 0.8, y0 + bedD + 0.6), Math.min(2.4, W * 0.55), 0.95, 0, { mat: 'rug', decor: true });
+            }
+          } else if (ori === 1) {
+            const bedX = x0 + bedD / 2 + 0.1;
+            const bedY = cy;
+            placedBed = add(room, 'bed', bedX, bedY, bedD, bedW, Math.PI / 2, { mat: 'wood' });
+            if (placedBed) {
+              add(room, 'nightstand', x0 + 0.3, bedY - bedW / 2 - 0.28, 0.4, 0.44, Math.PI / 2, { mat: 'wood' });
+              add(room, 'nightstand', x0 + 0.3, bedY + bedW / 2 + 0.28, 0.4, 0.44, Math.PI / 2, { mat: 'wood' });
+              const wardrobeW = Math.min(2.0, D * 0.48);
+              add(room, 'wardrobe', x1 - 0.32, cy, 0.6, wardrobeW, -Math.PI / 2, { mat: 'cabinet' });
+              add(room, 'rug', bedX + 0.7, bedY, 1.2, Math.min(2.2, D * 0.55), 0, { mat: 'rug', decor: true });
+            }
+          } else {
+            const bedX = x1 - bedD / 2 - 0.1;
+            const bedY = cy;
+            placedBed = add(room, 'bed', bedX, bedY, bedD, bedW, -Math.PI / 2, { mat: 'wood' });
+            if (placedBed) {
+              add(room, 'nightstand', x1 - 0.3, bedY - bedW / 2 - 0.28, 0.4, 0.44, -Math.PI / 2, { mat: 'wood' });
+              add(room, 'nightstand', x1 - 0.3, bedY + bedW / 2 + 0.28, 0.4, 0.44, -Math.PI / 2, { mat: 'wood' });
+              add(room, 'wardrobe', x0 + 0.32, cy, 0.6, Math.min(2.0, D * 0.48), Math.PI / 2, { mat: 'cabinet' });
+              add(room, 'rug', cx, cy, Math.min(2.0, W * 0.5), Math.min(1.6, D * 0.4), 0, { mat: 'rug', decor: true });
+            }
           }
-          add(room, 'rug', bedX + 0.8, bedY, 1.2, Math.min(2.2, D * 0.6), 0, { mat: 'rug', decor: true });
-        } else {
-          // East headboard with reading lounge chair & dresser
-          const bedX = x1 - bedD / 2 - 0.1;
-          const bedY = cy;
-          add(room, 'bed', bedX, bedY, bedD, bedW, -Math.PI / 2, { mat: 'wood' });
-          add(room, 'nightstand', x1 - 0.3, bedY - bedW / 2 - 0.26, 0.4, 0.44, -Math.PI / 2, { mat: 'wood' });
-          add(room, 'nightstand', x1 - 0.3, bedY + bedW / 2 + 0.26, 0.4, 0.44, -Math.PI / 2, { mat: 'wood' });
-          add(room, 'wardrobe', x0 + 0.32, cy, 0.62, Math.min(2.1, D * 0.52), Math.PI / 2, { mat: 'cabinet' });
-          add(room, 'chair', x0 + 0.6, y1 - 0.6, 0.65, 0.65, -0.7, { mat: 'fabric' });
-          add(room, 'floorLamp', x0 + 0.25, y1 - 0.25, 0.4, 0.4, 0, { mat: 'metal', decor: true });
-          add(room, 'rug', cx, cy, Math.min(2.2, W * 0.55), Math.min(1.6, D * 0.45), 0, { mat: 'rug', decor: true });
         }
       } else if (type === 'bathroom') {
-        if (variant === 0) {
-          // Shower + vanity + toilet
-          const sh = Math.min(0.98, Math.min(W * 0.48, D * 0.5));
-          add(room, 'shower', x0 + sh / 2 + 0.05, y0 + sh / 2 + 0.05, sh, sh, 0, { mat: 'stone' });
-          add(room, 'vanity', x0 + Math.min(0.95, W * 0.52) / 2 + 0.06, y1 - 0.3, Math.min(0.95, W * 0.52), 0.5, Math.PI, { mat: 'cabinet' });
-          add(room, 'toilet', x1 - 0.32, y0 + 0.62, 0.42, 0.66, Math.PI / 2, { mat: 'stone' });
-          add(room, 'bathMat', cx, cy + 0.25, Math.min(0.8, W * 0.5), 0.55, 0, { mat: 'linen', decor: true });
-        } else if (variant === 1) {
-          // Bathtub along back wall + vanity
-          const tubLen = Math.min(1.7, Math.max(1.2, W - 0.6));
-          add(room, 'bathtub', cx, y0 + 0.42, tubLen, 0.75, 0, { mat: 'stone' });
-          add(room, 'vanity', x0 + 0.3, y1 - 0.4, 0.5, Math.min(1.0, D * 0.45), Math.PI / 2, { mat: 'cabinet' });
-          add(room, 'toilet', x1 - 0.32, y1 - 0.45, 0.42, 0.66, -Math.PI / 2, { mat: 'stone' });
-          add(room, 'bathMat', cx, cy + 0.3, 0.8, 0.5, 0, { mat: 'linen', decor: true });
-        } else {
-          // Corner shower + side vanity
-          const sh = Math.min(1.05, Math.min(W * 0.5, D * 0.5));
-          add(room, 'shower', x1 - sh / 2 - 0.05, y0 + sh / 2 + 0.05, sh, sh, 0, { mat: 'stone' });
-          add(room, 'vanity', cx - 0.2, y1 - 0.3, Math.min(1.2, W * 0.6), 0.5, Math.PI, { mat: 'cabinet' });
-          add(room, 'toilet', x0 + 0.32, y0 + 0.6, 0.42, 0.66, -Math.PI / 2, { mat: 'stone' });
-          add(room, 'bathMat', cx, cy + 0.1, 0.75, 0.5, 0, { mat: 'linen', decor: true });
-        }
+        const sh = Math.min(0.95, Math.min(W * 0.48, D * 0.5));
+        const s1 = add(room, 'shower', x0 + sh / 2 + 0.05, y0 + sh / 2 + 0.05, sh, sh, 0, { mat: 'stone' });
+        if (!s1) add(room, 'shower', x1 - sh / 2 - 0.05, y0 + sh / 2 + 0.05, sh, sh, 0, { mat: 'stone' });
+        add(room, 'vanity', cx, y1 - 0.28, Math.min(0.95, W * 0.52), 0.48, Math.PI, { mat: 'cabinet' });
+        add(room, 'toilet', x1 - 0.3, cy, 0.42, 0.65, Math.PI / 2, { mat: 'stone' });
+        add(room, 'bathMat', cx, cy, Math.min(0.8, W * 0.5), 0.5, 0, { mat: 'linen', decor: true });
       } else if (type === 'hallway') {
         const long = D > W;
         if (long) {
-          add(room, 'rug', cx, cy, Math.min(0.85, W - 0.3), Math.min(2.1, D - 0.5), 0, { mat: 'rug' });
-          add(room, 'console', x0 + 0.18, cy, Math.min(1.0, D * 0.55), 0.32, -Math.PI / 2, { mat: 'wood', decor: true });
+          add(room, 'rug', cx, cy, Math.min(0.85, W - 0.3), Math.min(2.0, D - 0.6), 0, { mat: 'rug' });
+          add(room, 'console', x0 + 0.18, cy, Math.min(1.0, D * 0.5), 0.3, -Math.PI / 2, { mat: 'wood', decor: true });
         } else {
-          add(room, 'rug', cx, cy, Math.min(2.0, W - 0.5), Math.min(0.85, D - 0.25), 0, { mat: 'rug' });
-          add(room, 'console', x0 + 0.5, y1 - 0.2, Math.min(1.1, W * 0.5), 0.32, Math.PI, { mat: 'wood', decor: true });
+          add(room, 'rug', cx, cy, Math.min(2.0, W - 0.6), Math.min(0.85, D - 0.3), 0, { mat: 'rug' });
+          add(room, 'console', cx, y1 - 0.18, Math.min(1.1, W * 0.5), 0.3, Math.PI, { mat: 'wood', decor: true });
         }
-        if (density > 1.15) add(room, 'plant', x1 - 0.32, y1 - 0.32, 0.45, 0.45, 0, { mat: 'plant', decor: true });
       } else if (type === 'kitchen') {
-        if (variant === 0) {
-          // L-shaped counter with island
-          add(room, 'counter', cx, y0 + 0.31, Math.max(1.0, W - 0.55), 0.62, 0, { mat: 'cabinet', variant: 'sink' });
-          add(room, 'upperCabinets', cx, y0 + 0.19, Math.max(0.9, W - 1.2), 0.34, 0, { mat: 'cabinet', elev: 1.5, h: 0.7 });
-          const sideLen = Math.min(D - 1.0, 2.6);
-          if (sideLen > 1.0) {
-            add(room, 'counter', x1 - 0.31, y0 + 0.7 + sideLen / 2, sideLen, 0.62, Math.PI / 2, { mat: 'cabinet', variant: 'stove' });
-          }
-          add(room, 'fridge', x0 + 0.4, y1 - 0.42, 0.74, 0.72, Math.PI, { mat: 'metal' });
-          if (W > 4.6 && D > 3) {
-            add(room, 'island', cx, cy + 0.2, 1.5, 0.7, 0, { mat: 'cabinet' });
-            add(room, 'stool', cx - 0.4, cy + 0.78, 0.38, 0.38, 0, { mat: 'wood' });
-            add(room, 'stool', cx + 0.4, cy + 0.78, 0.38, 0.38, 0, { mat: 'wood' });
-          }
-        } else if (variant === 1) {
-          // Galley layout: dual parallel counters
-          add(room, 'counter', cx, y0 + 0.31, Math.max(1.0, W - 0.4), 0.62, 0, { mat: 'cabinet', variant: 'sink' });
-          add(room, 'counter', cx, y1 - 0.31, Math.max(1.0, W - 1.2), 0.62, Math.PI, { mat: 'cabinet', variant: 'stove' });
-          add(room, 'fridge', x1 - 0.42, y1 - 0.42, 0.74, 0.72, Math.PI, { mat: 'metal' });
-        } else {
-          // U-shaped kitchen layout
-          add(room, 'counter', cx, y0 + 0.31, Math.max(1.0, W - 0.4), 0.62, 0, { mat: 'cabinet', variant: 'sink' });
-          const sideLen = Math.min(D - 0.8, 2.2);
-          add(room, 'counter', x0 + 0.31, y0 + 0.7 + sideLen / 2, sideLen, 0.62, -Math.PI / 2, { mat: 'cabinet' });
-          add(room, 'counter', x1 - 0.31, y0 + 0.7 + sideLen / 2, sideLen, 0.62, Math.PI / 2, { mat: 'cabinet', variant: 'stove' });
-          add(room, 'fridge', x0 + 0.4, y1 - 0.42, 0.74, 0.72, Math.PI, { mat: 'metal' });
+        add(room, 'counter', cx, y0 + 0.31, Math.max(1.0, W - 0.5), 0.6, 0, { mat: 'cabinet', variant: 'sink' });
+        add(room, 'upperCabinets', cx, y0 + 0.19, Math.max(0.9, W - 1.0), 0.32, 0, { mat: 'cabinet', elev: 1.5, h: 0.7 });
+        add(room, 'fridge', x0 + 0.4, y1 - 0.4, 0.72, 0.7, Math.PI, { mat: 'metal' });
+        if (W > 3.6 && D > 2.8) {
+          add(room, 'island', cx, cy, 1.4, 0.7, 0, { mat: 'cabinet' });
         }
       } else if (type === 'dining') {
-        if (variant === 0) {
-          // Classic rectangular table
-          const tw = Math.min(1.8, W * 0.55);
-          const td = Math.min(0.95, D * 0.45);
-          add(room, 'diningTable', cx, cy, tw, td, 0, { mat: 'wood' });
-          const chairDist = td / 2 + 0.42;
-          add(room, 'chair', cx - tw / 4, cy - chairDist, 0.46, 0.46, 0, { mat: 'wood' });
-          add(room, 'chair', cx + tw / 4, cy - chairDist, 0.46, 0.46, 0, { mat: 'wood' });
-          add(room, 'chair', cx - tw / 4, cy + chairDist, 0.46, 0.46, Math.PI, { mat: 'wood' });
-          add(room, 'chair', cx + tw / 4, cy + chairDist, 0.46, 0.46, Math.PI, { mat: 'wood' });
-          add(room, 'pendant', cx, cy, 0.5, 0.5, 0, { mat: 'metal', elev: 2.05, h: 0.4, decor: true });
-          if (W > 3.6) add(room, 'sideboard', cx, y0 + 0.25, Math.min(1.8, W * 0.55), 0.42, 0, { mat: 'wood', decor: true });
-        } else if (variant === 1) {
-          // Round dining table setup
-          const dia = Math.min(1.3, Math.min(W * 0.48, D * 0.48));
-          add(room, 'diningTable', cx, cy, dia, dia, 0, { mat: 'wood' });
-          add(room, 'chair', cx, cy - dia / 2 - 0.38, 0.46, 0.46, 0, { mat: 'fabric' });
-          add(room, 'chair', cx, cy + dia / 2 + 0.38, 0.46, 0.46, Math.PI, { mat: 'fabric' });
-          add(room, 'chair', cx - dia / 2 - 0.38, cy, 0.46, 0.46, -Math.PI / 2, { mat: 'fabric' });
-          add(room, 'chair', cx + dia / 2 + 0.38, cy, 0.46, 0.46, Math.PI / 2, { mat: 'fabric' });
+        const tw = Math.min(1.8, W * 0.55);
+        const td = Math.min(0.95, D * 0.45);
+        const table = add(room, 'diningTable', cx, cy, tw, td, 0, { mat: 'wood' });
+        if (table) {
+          const chairDist = td / 2 + 0.4;
+          add(room, 'chair', cx - tw / 4, cy - chairDist, 0.44, 0.44, 0, { mat: 'wood' });
+          add(room, 'chair', cx + tw / 4, cy - chairDist, 0.44, 0.44, 0, { mat: 'wood' });
+          add(room, 'chair', cx - tw / 4, cy + chairDist, 0.44, 0.44, Math.PI, { mat: 'wood' });
+          add(room, 'chair', cx + tw / 4, cy + chairDist, 0.44, 0.44, Math.PI, { mat: 'wood' });
           add(room, 'pendant', cx, cy, 0.45, 0.45, 0, { mat: 'metal', elev: 2.05, h: 0.4, decor: true });
-          add(room, 'sideboard', x1 - 0.25, cy, 0.4, Math.min(1.6, D * 0.5), Math.PI / 2, { mat: 'wood', decor: true });
-        } else {
-          // Long feast table aligned with side wall
-          const tw = Math.min(2.1, W * 0.6);
-          const td = Math.min(0.85, D * 0.4);
-          add(room, 'diningTable', cx, cy + 0.2, tw, td, 0, { mat: 'wood' });
-          add(room, 'chair', cx - tw * 0.32, cy - td / 2 - 0.4, 0.46, 0.46, 0, { mat: 'wood' });
-          add(room, 'chair', cx, cy - td / 2 - 0.4, 0.46, 0.46, 0, { mat: 'wood' });
-          add(room, 'chair', cx + tw * 0.32, cy - td / 2 - 0.4, 0.46, 0.46, 0, { mat: 'wood' });
-          add(room, 'chair', cx - tw * 0.32, cy + td / 2 + 0.4, 0.46, 0.46, Math.PI, { mat: 'wood' });
-          add(room, 'chair', cx, cy + td / 2 + 0.4, 0.46, 0.46, Math.PI, { mat: 'wood' });
-          add(room, 'chair', cx + tw * 0.32, cy + td / 2 + 0.4, 0.46, 0.46, Math.PI, { mat: 'wood' });
-          add(room, 'sideboard', cx, y0 + 0.24, Math.min(2.0, W * 0.55), 0.4, 0, { mat: 'wood', decor: true });
         }
       } else if (type === 'office') {
-        if (variant === 0) {
-          // Center executive desk
-          const dw = Math.min(1.9, W * 0.6);
-          add(room, 'desk', cx, y0 + 0.38, dw, 0.66, 0, { mat: 'wood' });
-          add(room, 'monitor', cx, y0 + 0.22, 0.62, 0.12, 0, { mat: 'metal', elev: 0.78, h: 0.4 });
-          add(room, 'chair', cx, y0 + 1.05, 0.5, 0.5, Math.PI, { mat: 'fabric' });
-          add(room, 'bookshelf', x1 - 0.2, cy, Math.min(1.9, D * 0.55), 0.36, Math.PI / 2, { mat: 'wood' });
-          add(room, 'rug', cx, cy + 0.35, Math.min(2.3, W * 0.65), Math.min(1.6, D * 0.4), 0, { mat: 'rug', decor: true });
-        } else if (variant === 1) {
-          // Corner L-desk + reading chair
-          add(room, 'desk', x0 + 0.9, y0 + 0.35, 1.4, 0.6, 0, { mat: 'wood' });
-          add(room, 'desk', x0 + 0.35, y0 + 1.1, 0.6, 1.0, Math.PI / 2, { mat: 'wood' });
-          add(room, 'chair', x0 + 0.9, y0 + 0.9, 0.5, 0.5, Math.PI, { mat: 'fabric' });
-          add(room, 'bookshelf', x1 - 0.22, cy, Math.min(2.0, D * 0.6), 0.38, Math.PI / 2, { mat: 'wood' });
-          add(room, 'chair', x1 - 0.7, y1 - 0.7, 0.65, 0.65, -0.6, { mat: 'fabric', decor: true });
-          add(room, 'plant', x0 + 0.3, y1 - 0.3, 0.45, 0.45, 0, { mat: 'plant', decor: true });
-        } else {
-          // Dual workstation
-          const dw = Math.min(1.3, W * 0.4);
-          add(room, 'desk', cx - dw / 2 - 0.2, y0 + 0.38, dw, 0.65, 0, { mat: 'wood' });
-          add(room, 'chair', cx - dw / 2 - 0.2, y0 + 0.95, 0.48, 0.48, Math.PI, { mat: 'fabric' });
-          add(room, 'desk', cx + dw / 2 + 0.2, y0 + 0.38, dw, 0.65, 0, { mat: 'wood' });
-          add(room, 'chair', cx + dw / 2 + 0.2, y0 + 0.95, 0.48, 0.48, Math.PI, { mat: 'fabric' });
-          add(room, 'bookshelf', cx, y1 - 0.22, Math.min(2.2, W * 0.6), 0.38, Math.PI, { mat: 'wood' });
+        const dw = Math.min(1.6, W * 0.6);
+        add(room, 'desk', cx, y0 + 0.38, dw, 0.65, 0, { mat: 'wood' });
+        add(room, 'monitor', cx, y0 + 0.22, 0.6, 0.12, 0, { mat: 'metal', elev: 0.78, h: 0.4 });
+        add(room, 'chair', cx, y0 + 0.95, 0.48, 0.48, Math.PI, { mat: 'fabric' });
+        add(room, 'bookshelf', x1 - 0.2, cy, Math.min(1.8, D * 0.5), 0.35, Math.PI / 2, { mat: 'wood' });
+        add(room, 'rug', cx, cy + 0.3, Math.min(2.1, W * 0.6), Math.min(1.5, D * 0.4), 0, { mat: 'rug', decor: true });
+      } else if (type === 'closet' || type === 'storage') {
+        let shelfPlaced = add(room, 'shelf', cx, y0 + 0.22, Math.max(0.8, W - 0.4), 0.35, 0, { mat: 'wood' });
+        if (!shelfPlaced) {
+          shelfPlaced = add(room, 'shelf', cx, y1 - 0.22, Math.max(0.8, W - 0.4), 0.35, Math.PI, { mat: 'wood' });
         }
-      } else if (type === 'balcony') {
-        add(room, 'chair', cx - W * 0.18, cy - 0.15, 0.62, 0.62, -0.35, { mat: 'fabric' });
-        add(room, 'chair', cx + W * 0.18, cy - 0.15, 0.62, 0.62, 0.35, { mat: 'fabric' });
-        add(room, 'tableSmall', cx, cy + 0.5, 0.55, 0.55, 0, { mat: 'wood' });
-        add(room, 'plant', x0 + 0.32, y1 - 0.32, 0.5, 0.5, 0, { mat: 'plant' });
-        add(room, 'plant', x1 - 0.32, y1 - 0.32, 0.55, 0.55, 0, { mat: 'plant', decor: true });
-      } else if (type === 'storage') {
-        add(room, 'shelf', cx, y0 + 0.22, Math.max(1.0, W - 0.5), 0.4, 0, { mat: 'metal' });
-        add(room, 'boxes', x0 + 0.5, y1 - 0.45, 0.55, 0.55, 0, { mat: 'wood', decor: true });
-        add(room, 'boxes', x0 + 1.15, y1 - 0.4, 0.45, 0.45, 0.2, { mat: 'wood', decor: true });
-      } else if (type === 'closet') {
-        add(room, 'wardrobe', cx, y0 + 0.28, Math.max(0.9, W - 0.3), 0.5, 0, { mat: 'cabinet' });
-        add(room, 'shelf', cx, y0 + 0.18, Math.max(0.8, W - 0.4), 0.32, 0, { mat: 'wood', elev: 1.8, h: 0.05, decor: true });
-        add(room, 'boxes', x0 + 0.4, y1 - 0.35, 0.4, 0.4, 0, { mat: 'wood', decor: true });
-        if (W > 1.8 && D > 1.5) {
-          add(room, 'shelf', x1 - 0.2, cy, Math.min(1.1, D - 0.5), 0.32, Math.PI / 2, { mat: 'wood' });
+        if (!shelfPlaced) {
+          shelfPlaced = add(room, 'shelf', x0 + 0.22, cy, 0.35, Math.max(0.8, D - 0.4), Math.PI / 2, { mat: 'wood' });
         }
+        add(room, 'boxes', cx, cy, 0.45, 0.45, 0, { mat: 'wood', decor: true });
       } else {
-        // Living room variations
-        const wide = W > 7.2 && D > 3.0;
-
+        // Living room in primary zone
+        const sofaW = clamp(W * 0.35, 1.8, 2.4);
+        const sofaY = y1 - 0.65;
         if (variant === 0) {
-          // Standard wide layout with kitchenette or dining zone
-          if (wide) {
-            const counterLen = Math.min(D - 1.1, 2.5);
-            add(room, 'counter', x0 + 0.32, cy, counterLen, 0.62, -Math.PI / 2, { mat: 'cabinet', variant: 'sink' });
-            add(room, 'upperCabinets', x0 + 0.19, cy, Math.max(1.0, counterLen - 0.4), 0.34, -Math.PI / 2, { mat: 'cabinet', elev: 1.5, h: 0.7 });
-            add(room, 'island', x0 + 1.5, cy, 1.15, 0.66, 0, { mat: 'cabinet', variant: 'stove' });
-            add(room, 'stool', x0 + 2.1, cy - 0.38, 0.36, 0.36, 0, { mat: 'wood' });
-            add(room, 'stool', x0 + 2.1, cy + 0.38, 0.36, 0.36, 0, { mat: 'wood' });
-            const tableX = x0 + 3.55;
-            if (tableX + 0.9 < x1 - 2.2) {
-              add(room, 'diningTable', tableX, cy, 1.38, 0.86, 0, { mat: 'wood' });
-              add(room, 'chair', tableX - 0.36, cy - 0.74, 0.44, 0.44, 0, { mat: 'wood' });
-              add(room, 'chair', tableX + 0.36, cy - 0.74, 0.44, 0.44, 0, { mat: 'wood' });
-              add(room, 'chair', tableX - 0.36, cy + 0.74, 0.44, 0.44, Math.PI, { mat: 'wood' });
-              add(room, 'chair', tableX + 0.36, cy + 0.74, 0.44, 0.44, Math.PI, { mat: 'wood' });
-              add(room, 'pendant', tableX, cy, 0.42, 0.42, 0, { mat: 'metal', elev: 2.05, h: 0.38, decor: true });
-            }
-          } else if (W > 4.4) {
-            add(room, 'diningTable', x0 + 1.15, cy, 1.4, 0.85, 0, { mat: 'wood' });
-            add(room, 'chair', x0 + 0.8, cy - 0.72, 0.44, 0.44, 0, { mat: 'wood' });
-            add(room, 'chair', x0 + 1.5, cy + 0.72, 0.44, 0.44, Math.PI, { mat: 'wood' });
-          }
-
-          const loungeCx = wide ? x1 - 1.45 : cx + (W > 4.4 ? 1.2 : 0);
-          const sofaW = clamp(W * 0.26, 1.75, 2.5);
-          const sofaY = y1 - 0.68;
-          add(room, 'rug', loungeCx, Math.max(y0 + 1.2, y1 - 1.7), Math.min(3.0, sofaW + 0.6), Math.min(2.0, D - 0.9), 0, { mat: 'rug' });
-          add(room, 'sofa', loungeCx, sofaY, sofaW, 0.92, Math.PI, { mat: 'fabric' });
-          add(room, 'coffeeTable', loungeCx, Math.max(y0 + 1.15, sofaY - 1.28), 1.05, 0.56, 0, { mat: 'wood' });
-          add(room, 'tvConsole', loungeCx, y0 + 0.27, Math.min(1.9, sofaW), 0.44, 0, { mat: 'wood' });
-          add(room, 'tv', loungeCx, y0 + 0.12, Math.min(1.35, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
-          add(room, 'plant', x0 + 0.3, y1 - 0.3, 0.5, 0.5, 0, { mat: 'plant', decor: true });
-          if (density > 1.1) add(room, 'floorLamp', x1 - 0.28, sofaY - 0.35, 0.4, 0.4, 0, { mat: 'metal', decor: true });
+          add(room, 'rug', cx, cy, Math.min(2.8, sofaW + 0.4), Math.min(2.0, D * 0.6), 0, { mat: 'rug' });
+          add(room, 'sofa', cx, sofaY, sofaW, 0.9, Math.PI, { mat: 'fabric' });
+          add(room, 'coffeeTable', cx, Math.max(y0 + 1.1, sofaY - 1.15), 1.0, 0.55, 0, { mat: 'wood' });
+          add(room, 'tvConsole', cx, y0 + 0.28, Math.min(1.9, sofaW), 0.42, 0, { mat: 'wood' });
+          add(room, 'tv', cx, y0 + 0.15, Math.min(1.3, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
         } else if (variant === 1) {
-          // Conversational dual-seating layout
-          const loungeCx = wide ? x1 - 1.6 : cx;
-          const sofaW = clamp(W * 0.24, 1.8, 2.3);
-          add(room, 'rug', loungeCx, cy, Math.min(3.2, sofaW + 0.8), Math.min(2.4, D * 0.65), 0, { mat: 'rug' });
-          add(room, 'sofa', loungeCx, cy + 0.9, sofaW, 0.88, Math.PI, { mat: 'fabric' });
-          add(room, 'coffeeTable', loungeCx, cy, 1.1, 0.6, 0, { mat: 'wood' });
-          add(room, 'chair', loungeCx - sofaW * 0.35, cy - 0.85, 0.68, 0.68, 0, { mat: 'fabric' });
-          add(room, 'chair', loungeCx + sofaW * 0.35, cy - 0.85, 0.68, 0.68, 0, { mat: 'fabric' });
-          add(room, 'tvConsole', x1 - 0.25, cy, 0.4, Math.min(1.8, D * 0.5), -Math.PI / 2, { mat: 'wood' });
-          add(room, 'plant', x0 + 0.35, y0 + 0.35, 0.55, 0.55, 0, { mat: 'plant', decor: true });
-          if (wide) {
-            add(room, 'diningTable', x0 + 1.8, cy, 1.5, 0.9, 0, { mat: 'wood' });
-            add(room, 'chair', x0 + 1.4, cy - 0.7, 0.45, 0.45, 0, { mat: 'wood' });
-            add(room, 'chair', x0 + 2.2, cy - 0.7, 0.45, 0.45, 0, { mat: 'wood' });
-            add(room, 'chair', x0 + 1.4, cy + 0.7, 0.45, 0.45, Math.PI, { mat: 'wood' });
-            add(room, 'chair', x0 + 2.2, cy + 0.7, 0.45, 0.45, Math.PI, { mat: 'wood' });
-          }
+          add(room, 'rug', cx, cy, Math.min(3.0, sofaW + 0.6), Math.min(2.2, D * 0.65), 0, { mat: 'rug' });
+          add(room, 'sofa', cx, sofaY, sofaW, 0.88, Math.PI, { mat: 'fabric' });
+          add(room, 'coffeeTable', cx, cy, 1.05, 0.55, 0, { mat: 'wood' });
+          add(room, 'chair', cx - sofaW * 0.35, cy - 0.75, 0.65, 0.65, 0, { mat: 'fabric' });
+          add(room, 'chair', cx + sofaW * 0.35, cy - 0.75, 0.65, 0.65, 0, { mat: 'fabric' });
+          add(room, 'tvConsole', cx, y0 + 0.28, Math.min(1.8, sofaW), 0.4, 0, { mat: 'wood' });
         } else {
-          // L-shaped sectional sofa lounge layout
-          const loungeCx = wide ? x1 - 1.5 : cx;
-          const sofaW = clamp(W * 0.28, 2.0, 2.6);
-          add(room, 'rug', loungeCx - 0.2, cy, Math.min(3.0, sofaW + 0.5), Math.min(2.4, D * 0.6), 0, { mat: 'rug' });
-          // Main sofa
-          add(room, 'sofa', loungeCx, y1 - 0.65, sofaW, 0.9, Math.PI, { mat: 'fabric' });
-          // Return chaise / side sofa
-          add(room, 'sofa', loungeCx - sofaW / 2 + 0.4, cy + 0.2, 0.88, 1.25, -Math.PI / 2, { mat: 'fabric' });
-          add(room, 'coffeeTable', loungeCx + 0.2, cy + 0.2, 0.95, 0.55, 0, { mat: 'wood' });
-          add(room, 'tvConsole', loungeCx, y0 + 0.26, Math.min(2.0, sofaW), 0.42, 0, { mat: 'wood' });
-          add(room, 'floorLamp', loungeCx + sofaW / 2 + 0.2, y1 - 0.4, 0.4, 0.4, 0, { mat: 'metal', decor: true });
-          add(room, 'plant', x0 + 0.35, y1 - 0.35, 0.55, 0.55, 0, { mat: 'plant', decor: true });
-          if (wide) {
-            add(room, 'diningTable', x0 + 1.6, cy, 1.4, 0.85, 0, { mat: 'wood' });
-            add(room, 'chair', x0 + 1.6, cy - 0.7, 0.45, 0.45, 0, { mat: 'wood' });
-            add(room, 'chair', x0 + 1.6, cy + 0.7, 0.45, 0.45, Math.PI, { mat: 'wood' });
-          }
+          add(room, 'rug', cx, cy, Math.min(3.0, sofaW + 0.5), Math.min(2.2, D * 0.6), 0, { mat: 'rug' });
+          add(room, 'sofa', cx, sofaY, sofaW, 0.9, Math.PI, { mat: 'fabric' });
+          add(room, 'chair', cx - sofaW / 2 + 0.3, cy + 0.1, 0.7, 0.7, -Math.PI / 2, { mat: 'fabric' });
+          add(room, 'coffeeTable', cx + 0.2, cy, 0.95, 0.55, 0, { mat: 'wood' });
+          add(room, 'tvConsole', cx, y0 + 0.26, Math.min(1.9, sofaW), 0.42, 0, { mat: 'wood' });
         }
       }
     });

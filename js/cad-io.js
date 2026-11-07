@@ -254,6 +254,59 @@
   };
 
   /* ------------------------------------------------------------------ */
+  /* DWG Transcoder Bridge (WebAssembly)                                */
+  /* ------------------------------------------------------------------ */
+
+  CAD.isDWGBinary = function (bufferOrBytes) {
+    if (!bufferOrBytes) return false;
+    const bytes = bufferOrBytes instanceof Uint8Array ? bufferOrBytes : new Uint8Array(bufferOrBytes);
+    if (bytes.length < 6) return false;
+    // 'AC10' in ASCII (AutoCAD DWG header magic bytes)
+    return bytes[0] === 0x41 && bytes[1] === 0x43 && bytes[2] === 0x31 && bytes[3] === 0x30;
+  };
+
+  let _dwgInstancePromise = null;
+  CAD.convertDWGtoDXF = async function (arrayBuffer, options) {
+    options = options || {};
+    const uint8 = arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer);
+
+    if (!_dwgInstancePromise) {
+      _dwgInstancePromise = (async () => {
+        let LibreDwgClass = null;
+        let wasmDir = options.wasmDir || 'vendor/libredwg';
+
+        if (typeof window !== 'undefined' && window.location) {
+          const isFileProtocol = window.location.protocol === 'file:';
+          const baseHref = window.location.href.replace(/\/[^/]*$/, '/');
+          const moduleUrl = new URL('vendor/libredwg/libredwg-web.js', baseHref).href;
+          wasmDir = options.wasmDir || (isFileProtocol ? 'vendor/libredwg' : new URL('vendor/libredwg', baseHref).href);
+          try {
+            const mod = await import(moduleUrl);
+            LibreDwgClass = mod.LibreDwg;
+          } catch (importErr) {
+            if (isFileProtocol) {
+              throw new Error('WebAssembly modules cannot be loaded directly over file:// due to browser security restrictions. Please serve FloorCraft over HTTP (e.g. npx serve or Live Server) or convert the file to .dxf.');
+            }
+            throw importErr;
+          }
+        } else {
+          const mod = await import('../vendor/libredwg/libredwg-web.js');
+          LibreDwgClass = mod.LibreDwg;
+        }
+
+        return await LibreDwgClass.create(wasmDir);
+      })();
+    }
+
+    const libredwg = await _dwgInstancePromise;
+    const dxfBytes = libredwg.dwg_write_dxf(uint8);
+    if (!dxfBytes || !dxfBytes.length) {
+      throw new Error('AutoCAD DWG transcode failed. The DWG file may be damaged, encrypted, or use an incompatible version.');
+    }
+    return new TextDecoder('utf-8').decode(dxfBytes);
+  };
+
+  /* ------------------------------------------------------------------ */
   /* DXF Analyzer (Pre-import inspection)                               */
   /* ------------------------------------------------------------------ */
 

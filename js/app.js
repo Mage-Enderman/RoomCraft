@@ -1299,7 +1299,23 @@
             this._importRaw(JSON.parse(text));
             return;
           }
-          const text = await file.text();
+
+          const buffer = await file.arrayBuffer();
+          let text = '';
+          const isDWG = name.endsWith('.dwg') || (FC.CAD && FC.CAD.isDWGBinary && FC.CAD.isDWGBinary(buffer));
+
+          if (isDWG) {
+            this.toast('Transcoding AutoCAD DWG with WebAssembly...', 'info', 3500);
+            try {
+              text = await FC.CAD.convertDWGtoDXF(buffer);
+            } catch (dwgErr) {
+              console.error(dwgErr);
+              throw new Error('Could not read AutoCAD DWG (' + dwgErr.message + '). If the file is protected or unsupported, try exporting as DXF.');
+            }
+          } else {
+            text = new TextDecoder('utf-8').decode(buffer);
+          }
+
           const analysis = FC.CAD && FC.CAD.analyzeDXF ? FC.CAD.analyzeDXF(text) : null;
           if (analysis) {
             this.openCADImportModal(text, file.name, analysis);

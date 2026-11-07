@@ -1,8 +1,8 @@
 var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-import createModule from "../wasm/libredwg-web.js";
-import { default as default2 } from "../wasm/libredwg-web.js";
+import createModule from "./libredwg-wasm.js";
+import { default as default2 } from "./libredwg-wasm.js";
 var DwgCodePage = /* @__PURE__ */ ((DwgCodePage2) => {
   DwgCodePage2[DwgCodePage2["CP_UTF8"] = 0] = "CP_UTF8";
   DwgCodePage2[DwgCodePage2["CP_US_ASCII"] = 1] = "CP_US_ASCII";
