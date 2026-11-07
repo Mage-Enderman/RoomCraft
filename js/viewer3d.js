@@ -692,23 +692,49 @@
     }
 
     exportGLB() {
-      if (!this.world) this.build();
+      if (!this.renderer) this.initThree();
+      const wasActive = this.active;
+      this.active = true;
+      if (!this.world || this.needsBuild) this.build();
+      this.active = wasActive;
+
       if (!window.THREE || !window.THREE.GLTFExporter) {
         return Promise.reject(new Error('GLTFExporter is not loaded.'));
       }
       const exporter = new window.THREE.GLTFExporter();
-      const exportGroup = new THREE.Group();
-      this.world.traverse((child) => {
-        if (child.isMesh && child !== this.ground && child !== this.grid) {
-          exportGroup.add(child.clone());
-        }
-      });
+
+      // Ensure furniture is full scale (not collapsed by 2D/3D transition animation)
+      const oldFurnScaleY = this.furnitureGroup ? this.furnitureGroup.scale.y : 1;
+      const oldFurnPosY = this.furnitureGroup ? this.furnitureGroup.position.y : 0;
+      if (this.furnitureGroup) {
+        this.furnitureGroup.scale.set(1, 1, 1);
+        this.furnitureGroup.position.set(0, 0, 0);
+      }
+      this.world.updateMatrixWorld(true);
+
+      const exportScene = new THREE.Scene();
+      exportScene.name = (this.app.plan && this.app.plan.name) || 'FloorPlan';
+
+      for (const child of this.world.children) {
+        if (child === this.ground || child === this.grid || child.isGridHelper) continue;
+        if (child.isLight) continue;
+        exportScene.add(child.clone(true));
+      }
+
+      if (this.furnitureGroup) {
+        this.furnitureGroup.scale.y = oldFurnScaleY;
+        this.furnitureGroup.position.y = oldFurnPosY;
+      }
+
       return new Promise((resolve, reject) => {
         exporter.parse(
-          exportGroup,
+          exportScene,
           (gltf) => {
-            const blob = new Blob([gltf], { type: 'model/gltf-binary' });
-            resolve(blob);
+            if (gltf instanceof ArrayBuffer) {
+              resolve(new Blob([gltf], { type: 'model/gltf-binary' }));
+            } else {
+              resolve(new Blob([JSON.stringify(gltf, null, 2)], { type: 'application/json' }));
+            }
           },
           (err) => reject(err),
           { binary: true }

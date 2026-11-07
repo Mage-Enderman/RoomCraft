@@ -1749,8 +1749,8 @@
       try {
         const dxf = FC.CAD.exportDXF(this.plan);
         const blob = new Blob([dxf], { type: 'application/dxf' });
-        downloadBlob(blob, safeName(this.plan.name) + '.dwg');
-        this.toast('CAD drawing exported (.dwg / .dxf)', 'success');
+        downloadBlob(blob, safeName(this.plan.name) + '.dxf');
+        this.toast('CAD drawing exported (.dxf)', 'success');
       } catch (err) {
         console.error(err);
         this.toast('Could not export CAD: ' + err.message, 'error');

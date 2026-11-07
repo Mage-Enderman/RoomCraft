@@ -54,7 +54,14 @@
    */
 
 
-		parse( input, onDone, options ) {
+		parse( input, onDone, onError, options ) {
+
+			if ( typeof onError === 'object' && options === undefined ) {
+
+				options = onError;
+				onError = null;
+
+			}
 
 			const writer = new GLTFWriter();
 			const plugins = [];
