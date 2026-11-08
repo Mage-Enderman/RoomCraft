@@ -168,6 +168,15 @@
         out.push({ p: w.a, type: 'wall-end', wallId: w.id, end: 0, label: 'Endpoint' });
         out.push({ p: w.b, type: 'wall-end', wallId: w.id, end: 1, label: 'Endpoint' });
       });
+      const draggingRoomId = this.drag && this.drag.type === 'room-vertex' ? this.drag.roomId : null;
+      const draggingIdx = this.drag && this.drag.type === 'room-vertex' ? this.drag.index : -1;
+      (this.app.rooms || []).forEach((r) => {
+        if (!r || !Array.isArray(r.polygon)) return;
+        r.polygon.forEach((p, i) => {
+          if (r.id === draggingRoomId && i === draggingIdx) return;
+          out.push({ p, type: 'room-vertex', roomId: r.id, index: i, label: 'Room Corner' });
+        });
+      });
       return out;
     }
 
@@ -197,7 +206,7 @@
         return { point: { x: opts.chainFirst.x, y: opts.chainFirst.y }, type: 'close', label: 'Close loop' };
       }
 
-      // Existing corners / endpoints
+      // Existing corners / endpoints / room corners
       const verts = this.allVertices();
       for (const v of verts) {
         const d = FC.dist(raw, v.p);
@@ -229,14 +238,97 @@
       }
       if (best) return best;
 
+      const snapAngle = (opts.ortho || this.app.ui.ortho || this.app.plan.settings.snapAngle !== false);
+      const snapGrid = this.gridSnap && this.app.plan.settings.snapGrid !== false && opts.grid !== false;
+
+      // Wall ∩ Ortho intersection: prefer the exact crossing with any nearby wall so an
+      // orthogonally-drawn edge lands on the wall line instead of drifting or stopping at the grid.
+      if (from && snapAngle) {
+        const angle = Math.atan2(raw.y - from.y, raw.x - from.x);
+        const isHorizTry =
+          Math.abs(raw.y - from.y) <= this.screenTol(14) ||
+          Math.abs(FC.angleDiff(angle, 0)) < 0.17 ||
+          Math.abs(FC.angleDiff(angle, Math.PI)) < 0.17;
+        const isVertTry =
+          Math.abs(raw.x - from.x) <= this.screenTol(14) ||
+          Math.abs(FC.angleDiff(angle, Math.PI / 2)) < 0.17 ||
+          Math.abs(FC.angleDiff(angle, -Math.PI / 2)) < 0.17;
+
+        let bestInter = null;
+        for (let s = 0; s < segs.length; s++) {
+          const seg = segs[s];
+          if (!seg || seg.len < 0.15) continue;
+          const sdx = seg.b.x - seg.a.x;
+          const sdy = seg.b.y - seg.a.y;
+
+          if (isHorizTry && Math.abs(sdy) > 0.05) {
+            const t = (from.y - seg.a.y) / sdy;
+            if (t >= -0.02 && t <= 1.02) {
+              const ipt = { x: FC.round(seg.a.x + sdx * t, 4), y: from.y };
+              const d = FC.dist(raw, ipt);
+              if (d <= this.screenTol(18) && (!bestInter || d < bestInter.d)) {
+                bestInter = { d, point: ipt, seg, t, axis: 'Horizontal' };
+              }
+            }
+          }
+          if (isVertTry && Math.abs(sdx) > 0.05) {
+            const t = (from.x - seg.a.x) / sdx;
+            if (t >= -0.02 && t <= 1.02) {
+              const ipt = { x: from.x, y: FC.round(seg.a.y + sdy * t, 4) };
+              const d = FC.dist(raw, ipt);
+              if (d <= this.screenTol(18) && (!bestInter || d < bestInter.d)) {
+                bestInter = { d, point: ipt, seg, t, axis: 'Vertical' };
+              }
+            }
+          }
+        }
+        if (bestInter) {
+          return {
+            point: bestInter.point,
+            type: 'wall',
+            label: 'Wall ∩ ' + bestInter.axis,
+            seg: bestInter.seg,
+            offset: FC.clamp(bestInter.t, 0, 1) * bestInter.seg.len,
+          };
+        }
+      }
+
       // Nearest wall
       const wallHit = FC.nearestWall(plan, raw, this.screenTol(11));
       if (wallHit) {
         return { point: wallHit.point, type: 'wall', label: 'Wall', seg: wallHit.seg, offset: wallHit.offset };
       }
 
-      const snapAngle = (opts.ortho || this.app.ui.ortho || this.app.plan.settings.snapAngle !== false);
-      const snapGrid = this.gridSnap && this.app.plan.settings.snapGrid !== false && opts.grid !== false;
+      // Nearest existing room boundary edge
+      const draggingRoomId = this.drag && this.drag.type === 'room-vertex' ? this.drag.roomId : null;
+      let bestRoomEdge = null;
+      (this.app.rooms || []).forEach((r) => {
+        if (!r || !Array.isArray(r.polygon) || r.polygon.length < 3 || r.id === draggingRoomId) return;
+        const poly = r.polygon;
+        for (let i = 0; i < poly.length; i++) {
+          const a = poly[i];
+          const b = poly[(i + 1) % poly.length];
+          const h = FC.pointSegment(raw, a, b);
+          if (h.dist <= this.screenTol(10) && (!bestRoomEdge || h.dist < bestRoomEdge.dist)) {
+            bestRoomEdge = { dist: h.dist, point: h.point, a, b, room: r };
+          }
+        }
+      });
+      if (bestRoomEdge) {
+        let rpt = { x: FC.round(bestRoomEdge.point.x, 4), y: FC.round(bestRoomEdge.point.y, 4) };
+        if (from && snapAngle) {
+          const rdx = bestRoomEdge.b.x - bestRoomEdge.a.x;
+          const rdy = bestRoomEdge.b.y - bestRoomEdge.a.y;
+          if (Math.abs(raw.y - from.y) <= this.screenTol(14) && Math.abs(rdy) > 0.05) {
+            const t = (from.y - bestRoomEdge.a.y) / rdy;
+            if (t >= -0.02 && t <= 1.02) rpt = { x: FC.round(bestRoomEdge.a.x + rdx * t, 4), y: from.y };
+          } else if (Math.abs(raw.x - from.x) <= this.screenTol(14) && Math.abs(rdx) > 0.05) {
+            const t = (from.x - bestRoomEdge.a.x) / rdx;
+            if (t >= -0.02 && t <= 1.02) rpt = { x: from.x, y: FC.round(bestRoomEdge.a.y + rdy * t, 4) };
+          }
+        }
+        return { point: rpt, type: 'wall', label: 'Room Boundary' };
+      }
 
       // Orthogonal / rotational angle snapping
       if (from && snapAngle) {
@@ -727,6 +819,10 @@
         if (room) {
           this.app.select({ type: 'room', id: room.id });
           this.app.ui.openRoomSelection(room.id);
+          const vHit = this.hitRoomVertex(w, room);
+          if (vHit) {
+            this.drag = { type: 'room-vertex', roomId: room.id, index: vHit.index, moved: false, pushed: false };
+          }
           return;
         }
 
@@ -794,6 +890,11 @@
 
       const hit = this.hitTest(w);
       if (hit) {
+        if (hit.type === 'room-vertex') {
+          this.app.select({ type: 'room', id: hit.roomId });
+          this.drag = { type: 'room-vertex', roomId: hit.roomId, index: hit.index, moved: false, pushed: false };
+          return;
+        }
         if (hit.type === 'junction') {
           this.drag = { type: 'junction', junction: hit.junction, moved: false, pushed: false };
           return;
@@ -1212,6 +1313,13 @@
             this.app.changed({ rooms: false, furniture: false, save: true });
           } else if (dragType === 'light' || dragType === 'opening') {
             this.app.changed({ rooms: false, furniture: false, save: true });
+          } else if (dragType === 'room-vertex') {
+            this.snap = null;
+            if (FC.snapRoomPolygons && this.app.plan && this.app.rooms) {
+              FC.snapRoomPolygons(this.app.plan, this.app.rooms);
+              this.app.plan.rooms = this.app.rooms;
+            }
+            this.app.changed({ rooms: false, furniture: false, save: true });
           } else {
             if (dragType === 'junction' && this.drag.junction) {
               const jPt = { x: this.drag.junction.x, y: this.drag.junction.y };
@@ -1517,6 +1625,85 @@
         this.app.changed({ rooms: true, furniture: false, save: false });
         return;
       }
+      if (this.drag.type === 'room-vertex') {
+        if (!this.drag.pushed) {
+          this.app.pushHistory();
+          this.drag.pushed = true;
+        }
+        const room = (this.app.rooms || []).find((r) => r.id === this.drag.roomId);
+        if (!room || !Array.isArray(room.polygon) || !room.polygon[this.drag.index]) return;
+        const idx = this.drag.index;
+        const n = room.polygon.length;
+        const prev = room.polygon[(idx - 1 + n) % n];
+        const next = room.polygon[(idx + 1) % n];
+        const anchors = [prev, next].filter(Boolean);
+
+        // Ensure room is persisted in plan.manualRooms so edits survive room detection
+        room.isManual = true;
+        if (!Array.isArray(plan.manualRooms)) plan.manualRooms = [];
+        let mr = plan.manualRooms.find((m) => m.id === room.id);
+        if (!mr) {
+          mr = {
+            id: room.id,
+            name: room.name || 'Custom Room',
+            type: room.type || 'living',
+            polygon: room.polygon.map((pt) => ({ x: pt.x, y: pt.y })),
+            isManual: true,
+          };
+          plan.manualRooms.push(mr);
+        }
+
+        const rawSnap = this.snapPoint(w, prev || null, { ortho: this.app.ui.ortho });
+        let pt = { x: rawSnap.point.x, y: rawSnap.point.y };
+        let snapGuide = rawSnap.type !== 'free' && rawSnap.type !== 'grid' ? rawSnap : null;
+
+        const snapAngle = (this.app.plan.settings.snapAngle !== false || this.app.ui.ortho) && !this.altDown;
+        if (snapAngle && anchors.length > 0 && (!snapGuide || snapGuide.type === 'wall' || snapGuide.type === 'axis')) {
+          const tol = this.screenTol(14);
+          for (const anc of anchors) {
+            if (Math.abs(w.y - anc.y) < tol) {
+              if (snapGuide && snapGuide.type === 'wall' && snapGuide.seg) {
+                const sdx = snapGuide.seg.b.x - snapGuide.seg.a.x;
+                const sdy = snapGuide.seg.b.y - snapGuide.seg.a.y;
+                if (Math.abs(sdy) > 0.05) {
+                  const t = (anc.y - snapGuide.seg.a.y) / sdy;
+                  if (t >= -0.02 && t <= 1.02) pt.x = snapGuide.seg.a.x + sdx * t;
+                }
+              }
+              pt.y = anc.y;
+              snapGuide = { anchor: anc, type: 'axis', label: 'Horizontal (0°)', point: pt };
+            }
+            if (Math.abs(w.x - anc.x) < tol) {
+              if (snapGuide && snapGuide.type === 'wall' && snapGuide.seg) {
+                const sdx = snapGuide.seg.b.x - snapGuide.seg.a.x;
+                const sdy = snapGuide.seg.b.y - snapGuide.seg.a.y;
+                if (Math.abs(sdx) > 0.05) {
+                  const t = (anc.x - snapGuide.seg.a.x) / sdx;
+                  if (t >= -0.02 && t <= 1.02) pt.y = snapGuide.seg.a.y + sdy * t;
+                }
+              }
+              pt.x = anc.x;
+              snapGuide = { anchor: anc, type: 'axis', label: 'Vertical (90°)', point: pt };
+            }
+          }
+        }
+
+        this.snap = snapGuide;
+        room.polygon[idx].x = FC.round(pt.x, 4);
+        room.polygon[idx].y = FC.round(pt.y, 4);
+        room.area = FC.round(Math.abs(FC.polygonArea(room.polygon)), 2);
+        room.centroid = FC.polygonCentroid(room.polygon);
+        room.bounds = FC.polygonBounds(room.polygon);
+        if (mr) {
+          mr.polygon = room.polygon.map((p) => ({ x: p.x, y: p.y }));
+          mr.area = room.area;
+          mr.centroid = { x: room.centroid.x, y: room.centroid.y };
+          mr.bounds = Object.assign({}, room.bounds);
+        }
+        plan.rooms = this.app.rooms;
+        if (this.app.viewer) this.app.viewer.markDirty();
+        return;
+      }
       if (this.drag.type === 'wall-end') {
         if (!this.drag.pushed) {
           this.app.pushHistory();
@@ -1820,6 +2007,17 @@
         if (FC.pointInPolygon(w, rooms[i].polygon)) return rooms[i];
       }
       return null;
+    }
+
+    hitRoomVertex(w, room, tolPx) {
+      if (!room || !Array.isArray(room.polygon)) return null;
+      const tol = this.screenTol(tolPx || 10);
+      let best = null;
+      room.polygon.forEach((p, index) => {
+        const d = FC.dist(w, p);
+        if (d <= tol && (!best || d < best.d)) best = { index, d, point: p };
+      });
+      return best;
     }
 
     hitOpening(w) {
@@ -2246,6 +2444,14 @@
       const rotHit = this.hitFurnitureRotate(w);
       if (rotHit) return { type: 'furniture-rotate', furniture: rotHit };
 
+      // Draggable corner handles on the currently selected room
+      const sel = this.app.ui && this.app.ui.selection;
+      if (sel && sel.type === 'room') {
+        const selRoom = (this.app.rooms || []).find((r) => r.id === sel.id);
+        const vHit = this.hitRoomVertex(w, selRoom, 10);
+        if (vHit) return { type: 'room-vertex', roomId: selRoom.id, index: vHit.index };
+      }
+
       const lightHit = this.hitLight(w);
       if (lightHit) return { type: 'light', light: lightHit };
 
@@ -2327,6 +2533,7 @@
       this.drawOpenings(segs);
       this.drawOpeningOffsets(segs);
       this.drawLights();
+      this.drawRoomVertexHandles(rooms);
       this.drawOutlineHandles();
       if (plan.settings.showDims && plan.outline.length >= 3 && !this.app.ui.drawingFresh) this.drawDims();
       this.drawDraft(segs);
@@ -2404,6 +2611,28 @@
           ctx.setLineDash([]);
         }
       });
+    }
+
+    drawRoomVertexHandles(rooms) {
+      const sel = this.app.ui && this.app.ui.selection;
+      if (!sel || sel.type !== 'room') return;
+      const room = (rooms || []).find((r) => r.id === sel.id);
+      if (!room || !Array.isArray(room.polygon)) return;
+      const ctx = this.ctx;
+      const hover = this.hover && this.hover.type === 'room-vertex' && this.hover.roomId === room.id ? this.hover.index : -1;
+      ctx.save();
+      room.polygon.forEach((p, i) => {
+        const s = this.w2s(p);
+        const active = i === hover;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, active ? 6 : 4.5, 0, TAU);
+        ctx.fillStyle = active ? ACCENT : '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = ACCENT;
+        ctx.stroke();
+      });
+      ctx.restore();
     }
 
     drawRoomLabels(rooms) {

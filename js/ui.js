@@ -731,6 +731,10 @@
         const t = FC.roomTypes[room.type] || FC.roomTypes.living;
         const isManual = this.app.plan.autoDetectRooms === false || room.isManual;
         const areaVal = FC.formatAreaValue ? FC.formatAreaValue(room.area, plan, 1) : FC.fmt(room.area, 1);
+        const roomPieces = (this.app.furniture || []).filter((f) => {
+          if (f.roomId) return f.roomId === room.id;
+          return room.polygon && room.polygon.length >= 3 && FC.pointInPolygon({ x: f.x, y: f.y }, room.polygon);
+        }).length;
         return `<div class="sel-card">
           <div class="sel-head">
             <div><span class="eyebrow">${isManual ? 'Manual Room (Locked)' : 'Detected Room'}</span><div class="sel-title">${esc(room.name || t.label)}</div></div>
@@ -747,15 +751,16 @@
             <div class="micro-label" style="margin-bottom:6px;">Room type & furnishing</div>
             ${this.typeGrid(room)}
           </div>
-          <div class="btn-row two" style="margin-top:10px;">
+          <button class="btn primary sm" style="width:100%;margin-top:10px;" data-action="furnish-room" data-room="${room.id}" title="Replace only this room's generated furniture, leaving other rooms untouched">${I('sparkles')} ${roomPieces ? 'Regenerate furniture' : 'Generate furniture'}</button>
+          <div class="btn-row two" style="margin-top:6px;">
             <button class="btn soft sm" data-action="tool" data-tool="divider" title="Draw an invisible room divider to partition this space">${I('divider')} Split with divider</button>
-            <button class="btn soft sm" data-action="furnish-room" data-room="${room.id}" title="Regenerate furniture layout in this room">${I('sparkles')} Regenerate room</button>
+            <button class="btn soft sm" data-action="open-furniture-catalog" data-room="${room.id}" title="Browse the catalog and place furniture in this room">${I('plus')} Browse furniture</button>
           </div>
+          <button class="btn soft sm" style="width:100%;margin-top:6px;" data-action="snap-rooms" title="Snap this room's corners to walls, structural corners and adjacent rooms to remove overlaps">${I('sliders')} Snap room boundaries</button>
           <div class="btn-row two" style="margin-top:6px;">
             <button class="btn soft sm" data-action="copy-selection" title="Copy room walls, doors, windows & furniture (Ctrl+C) to paste in any floorplan">${I('copy')} Copy room</button>
             <button class="btn soft sm" data-action="duplicate-selection" title="Duplicate room (Ctrl+D)">${I('plus')} Duplicate room</button>
           </div>
-          <button class="btn soft sm" style="width:100%;margin-top:8px;" data-action="open-furniture-catalog" data-room="${room.id}">${I('plus')} Browse & Add Furniture</button>
           <button class="danger-link" data-action="delete-room" data-room="${room.id}">${I('trash')} Remove this room</button>
         </div>`;
       }
@@ -870,6 +875,8 @@
           </button>
         </div>
 
+        ${rooms.length ? `<button class="btn soft sm" style="width:100%;margin-bottom:12px;" data-action="snap-rooms" title="Align room corners to walls, structural corners and adjacent room edges">${I('sliders')} <span>Snap room boundaries</span></button>` : ''}
+
         ${preview ? `<div class="room-preview-box">
           <div class="preview-box-head">
             <div>
@@ -907,19 +914,18 @@
               const t = FC.roomTypes[r.type] || FC.roomTypes.living;
               const active = selectedRoom && selectedRoom.id === r.id;
               const areaStr = FC.formatArea ? FC.formatArea(r.area, this.app.plan, 1) : FC.fmt(r.area, 1) + ' m²';
-              return `<div class="room-row ${active ? 'active' : ''}" data-action="focus-room" data-room="${r.id}" style="cursor:pointer;">
+              return `<button type="button" class="room-row ${active ? 'active' : ''}" data-action="focus-room" data-room="${r.id}">
                 <span class="room-dot" style="background:${t.color}"></span>
                 <span class="room-main"><b>${esc(r.name || t.label)}</b><span>${areaStr}</span></span>
                 <span class="room-kind">${t.label.replace(' room', '')}</span>
-                <button class="icon-btn soft xs" data-action="furnish-room" data-room="${r.id}" title="Regenerate ${esc(r.name || t.label)} interior">${I('refresh')}</button>
-              </div>`;
+              </button>`;
             })
             .join('')}
         </div>` : `<p class="helper" style="margin-top:10px;">No enclosed rooms yet. Draw walls or click <b>Draw room</b> above to define spaces.</p>`}
         ${selectedRoom ? `<div class="room-types" style="margin-top:12px;">
           <div class="micro-label" style="margin-bottom:6px;">Type: ${esc(selectedRoom.name || 'Room')}</div>
           ${this.typeGrid(selectedRoom)}
-        </div>` : `<p class="helper tight" style="margin-top:10px;">Click any room on canvas or in list above to rename, assign type, or partition.</p>`}
+        </div>` : `<p class="helper tight" style="margin-top:10px;">Click any room on canvas or in the list above to rename it, assign its type, or regenerate its furniture.</p>`}
       </section>`;
     }
 
@@ -953,28 +959,34 @@
       const plan = this.app.plan;
       const rooms = this.app.rooms || [];
       const count = FC.furnitureCount(this.app.furniture);
+      const selectedRoom = this.app.ui.selection && this.app.ui.selection.type === 'room' ? rooms.find((r) => r.id === this.app.ui.selection.id) : null;
+      const selectedType = selectedRoom ? FC.roomTypes[selectedRoom.type] || FC.roomTypes.living : null;
+      const selectedName = selectedRoom ? selectedRoom.name || selectedType.label : '';
+      const selectedPieces = selectedRoom ? (this.app.furniture || []).filter((f) => f.roomId === selectedRoom.id).length : 0;
       return `<section class="panel-block">
         ${this.moduleHead('Interior', plan.furnished ? count + ' pieces placed' : 'Not furnished')}
-        <p class="helper">${plan.furnished ? 'Furniture is generated per room type. Change a room type or wall layout and it reflows automatically, or regenerate individual rooms below.' : 'Choose a style, then generate a furnished interior tailored to each room.'}</p>
+        <p class="helper">${plan.furnished ? 'Furniture is generated per room type. Change a room type or wall layout and it reflows automatically. Select a room below to regenerate just its furniture.' : 'Choose a style, then generate a furnished interior tailored to each room.'}</p>
         <div class="density-row">
           <div class="field-head"><span>Furnishing level</span><span class="value" data-density-value>${plan.density < 0.8 ? 'Essential' : plan.density > 1.15 ? 'Rich' : 'Comfort'}</span></div>
           <input type="range" data-density min="0.5" max="1.5" step="0.05" value="${plan.density}">
         </div>
         ${rooms.length ? `<div style="margin-top:12px;">
-          <div class="micro-label" style="margin-bottom:6px;">Regenerate single room</div>
+          <div class="micro-label" style="margin-bottom:6px;">Rooms</div>
           <div class="room-list">
             ${rooms
               .map((r) => {
                 const t = FC.roomTypes[r.type] || FC.roomTypes.living;
                 const rPieces = (this.app.furniture || []).filter((f) => f.roomId === r.id).length;
-                return `<div class="room-row" data-action="focus-room" data-room="${r.id}" style="cursor:pointer;">
+                const active = selectedRoom && selectedRoom.id === r.id;
+                return `<button type="button" class="room-row ${active ? 'active' : ''}" data-action="focus-room" data-room="${r.id}" data-keep-step="1">
                   <span class="room-dot" style="background:${t.color}"></span>
                   <span class="room-main"><b>${esc(r.name || t.label)}</b><span>${rPieces} piece${rPieces === 1 ? '' : 's'}</span></span>
-                  <button class="btn soft xs" data-action="furnish-room" data-room="${r.id}" title="Regenerate ${esc(r.name || t.label)} interior">${I('refresh')} Regenerate</button>
-                </div>`;
+                  <span class="room-kind">${t.label.replace(' room', '')}</span>
+                </button>`;
               })
               .join('')}
           </div>
+          ${selectedRoom ? `<button class="btn primary sm" style="width:100%;margin-top:8px;" data-action="furnish-room" data-room="${selectedRoom.id}" title="Replace only ${esc(selectedName)}'s generated furniture, leaving other rooms untouched">${I('sparkles')} ${selectedPieces ? 'Regenerate' : 'Generate'} ${esc(selectedName)} furniture</button>` : ''}
         </div>` : ''}
         <button class="btn soft sm" style="width:100%;margin-top:12px;" data-action="open-furniture-catalog">${I('plus')} Browse & Add Furniture</button>
         ${plan.furnished ? `<button class="danger-link subtle" data-action="clear-furniture" style="margin-top:10px;">${I('trash')} Clear furniture</button>` : ''}
@@ -1501,7 +1513,10 @@
           app.adoptDetectedRoom(el.dataset.candidate);
           break;
         case 'focus-room':
-          app.focusRoom(el.dataset.room);
+          app.focusRoom(el.dataset.room, { keepStep: el.dataset.keepStep === '1' });
+          break;
+        case 'snap-rooms':
+          app.snapRoomBoundaries();
           break;
         case 'redraw-outline':
           app.redrawOutline();
@@ -1813,8 +1828,9 @@
       if (targetRoomId) {
         room = this.app.rooms.find((r) => r.id === targetRoomId);
       }
-      if (!room && this.selection && this.selection.type === 'room') {
-        room = this.app.rooms.find((r) => r.id === this.selection.id);
+      const selected = this.app.ui && this.app.ui.selection;
+      if (!room && selected && selected.type === 'room') {
+        room = this.app.rooms.find((r) => r.id === selected.id);
       }
       const roomLabel = room ? (room.name || (FC.roomTypes[room.type] && FC.roomTypes[room.type].label) || 'Selected Room') : 'Floor Plan';
 

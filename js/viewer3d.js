@@ -320,15 +320,22 @@
         geo.rotateX(-Math.PI / 2);
         geo.translate(-cx, 0, -cy);
         geo.name = `${roomLabel}_Floor`;
+        const offsetIndex = idx % 8;
+        const floorY = 0.006 + (idx % 12) * 0.00025;
         const mat = new THREE.MeshStandardMaterial({
           color: this.floorColorFor(room, style),
           roughness: room.type === 'bathroom' || room.type === 'kitchen' ? 0.55 : 0.82,
           metalness: 0,
+          // Stagger overlapping floor meshes so coplanar room seams never Z-fight
+          polygonOffset: true,
+          polygonOffsetFactor: -offsetIndex,
+          polygonOffsetUnits: -1,
         });
         mat.name = `Floor_${roomLabel}`;
         const mesh = new THREE.Mesh(geo, mat);
         mesh.name = `${roomLabel}_Floor`;
-        mesh.position.set(cx, 0.006, cy);
+        mesh.position.set(cx, floorY, cy);
+        mesh.renderOrder = offsetIndex;
         mesh.receiveShadow = true;
         mesh.userData = { isFloor: true, roomId: room.id, roomLabel, cx, cy };
         this.floorMeshes.push(mesh);
@@ -342,12 +349,13 @@
           const horizontal = bb.w > bb.d;
           const n = Math.ceil((horizontal ? bb.d : bb.w) / step);
           for (let i = 1; i < n; i++) {
+            const jointY = floorY + 0.003;
             if (horizontal) {
               const z = bb.y0 + i * step;
-              lines.push(bb.x0 + 0.05, 0.009, z, bb.x1 - 0.05, 0.009, z);
+              lines.push(bb.x0 + 0.05, jointY, z, bb.x1 - 0.05, jointY, z);
             } else {
               const x = bb.x0 + i * step;
-              lines.push(x, 0.009, bb.y0 + 0.05, x, 0.009, bb.y1 - 0.05);
+              lines.push(x, jointY, bb.y0 + 0.05, x, jointY, bb.y1 - 0.05);
             }
           }
           if (lines.length) {

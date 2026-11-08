@@ -560,10 +560,10 @@
       }
     }
 
-    focusRoom(id) {
+    focusRoom(id, opts = {}) {
       const room = (this.rooms || []).find((r) => r.id === id);
       if (!room) return;
-      this.ui.step = 3;
+      if (!opts.keepStep) this.ui.step = 3;
       this.ui.selection = { type: 'room', id };
       if (this.ui.view3d) {
         if (this.viewer && this.viewer.goal) {
@@ -787,6 +787,7 @@
       if (this.plan.autoDetectRooms === false) {
         this.rooms = this.rooms || [];
         this.rooms.push(newRoom);
+        if (FC.snapRoomPolygons) FC.snapRoomPolygons(this.plan, this.rooms);
         this.plan.rooms = this._roomMeta();
       } else {
         this.rooms = FC.detectRooms(this.plan);
@@ -796,8 +797,41 @@
       this.select({ type: 'room', id });
       this.changed({ save: true });
       this.ui.renderAll();
-      const areaStr = FC.formatArea ? FC.formatArea(area, this.plan, 1) : area.toFixed(1) + ' m²';
+      const finalArea = newRoom.area || area;
+      const areaStr = FC.formatArea ? FC.formatArea(finalArea, this.plan, 1) : finalArea.toFixed(1) + ' m²';
       this.toast('Added "' + rName + '" (' + areaStr + ')', 'success');
+    }
+
+    snapRoomBoundaries() {
+      if (!this.plan || !FC.snapRoomPolygons) return;
+      this.pushHistory();
+      let rooms = this.rooms || [];
+      let removed = 0;
+      if (FC.dedupeRooms) {
+        const deduped = FC.dedupeRooms(rooms);
+        removed = rooms.length - deduped.length;
+        rooms = deduped;
+      }
+      const count = FC.snapRoomPolygons(this.plan, rooms);
+      this.rooms = rooms;
+      this.plan.rooms = this._roomMeta();
+      if (this.plan.furnished && FC.sanitizeFurniture) {
+        FC.sanitizeFurniture(this.plan, rooms);
+        this.furniture = this.plan.furniture;
+      }
+      this.changed({ save: true });
+      if (this.ui) this.ui.renderAll();
+      if (this.editor) this.editor.draw();
+      if (this.viewer) this.viewer.markDirty();
+      if (count > 0 || removed > 0) {
+        const aligned = count === 1 ? '1 room corner' : count + ' room corners';
+        this.toast(
+          'Aligned ' + aligned + (removed ? ' and removed ' + removed + ' duplicate room' + (removed === 1 ? '' : 's') : ''),
+          'success'
+        );
+      } else {
+        this.toast('Room boundaries are already aligned', 'info');
+      }
     }
 
     toggleWallVirtual(wallId) {

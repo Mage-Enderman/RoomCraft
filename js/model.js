@@ -1204,6 +1204,15 @@
     plan.layoutVariation = parseInt(raw.layoutVariation, 10) || 0;
     plan.settings.wallHeight = clamp(plan.settings.wallHeight, 1.8, 5);
     plan.density = clamp(+raw.density || 1, 0.4, 1.6);
+    if (FC.dedupeRooms && plan.rooms && plan.rooms.length) {
+      plan.rooms = FC.dedupeRooms(plan.rooms);
+    }
+    if (FC.snapRoomPolygons && plan.rooms && plan.rooms.length) {
+      FC.snapRoomPolygons(plan, plan.rooms);
+    }
+    if (FC.sanitizeFurniture && plan.furniture && plan.furniture.length && plan.rooms && plan.rooms.length) {
+      FC.sanitizeFurniture(plan, plan.rooms);
+    }
     return plan;
   };
 
@@ -1916,13 +1925,26 @@
       if (!dup) unique.push(f);
     }
 
-    // Merge in any manually defined rooms from plan.manualRooms
+    // Merge in any manually defined rooms from plan.manualRooms, replacing overlapping auto-detected faces
     if (Array.isArray(plan.manualRooms)) {
       plan.manualRooms.forEach((mr) => {
         if (!mr || !mr.polygon || mr.polygon.length < 3) return;
         const clean = FC.dedupePolygon(mr.polygon);
         const area = mr.area || Math.abs(FC.polygonArea(clean));
         const centroid = mr.centroid || FC.polygonCentroid(clean);
+        // Remove any auto-detected face that covers the same room
+        for (let i = unique.length - 1; i >= 0; i--) {
+          const u = unique[i];
+          if (u.isManual) continue;
+          const areaRatio = Math.min(u.area, area) / Math.max(u.area, area, 0.01);
+          const distC = FC.dist(u.centroid, centroid);
+          if (
+            (distC < 0.85 && areaRatio > 0.55) ||
+            (areaRatio > 0.7 && (FC.pointInPolygon(u.centroid, clean) || FC.pointInPolygon(centroid, u.polygon)))
+          ) {
+            unique.splice(i, 1);
+          }
+        }
         unique.push({
           id: mr.id || FC.uid('room_manual'),
           name: mr.name || 'Custom Room',
@@ -1955,7 +1977,247 @@
     });
 
     assignRoomMeta(plan, filtered);
+    if (FC.snapRoomPolygons) {
+      FC.snapRoomPolygons(plan, filtered);
+    }
     return filtered.sort((a, b) => b.area - a.area);
+  };
+
+  FC.dedupeRooms = function (rooms) {
+    if (!Array.isArray(rooms) || rooms.length <= 1) return rooms || [];
+    const manuals = [];
+    const autos = [];
+    const seenIds = new Set();
+    rooms.forEach((r) => {
+      if (!r || !Array.isArray(r.polygon) || r.polygon.length < 3) return;
+      if (r.id && seenIds.has(r.id)) return;
+      if (r.id) seenIds.add(r.id);
+      if (r.isManual || (r.id && String(r.id).startsWith('room_manual'))) {
+        r.isManual = true;
+        manuals.push(r);
+      } else {
+        autos.push(r);
+      }
+    });
+    const keptAutos = autos.filter((autoR) => {
+      const aArea = autoR.area || Math.abs(FC.polygonArea(autoR.polygon));
+      const aCent = autoR.centroid || FC.polygonCentroid(autoR.polygon);
+      for (let i = 0; i < manuals.length; i++) {
+        const manR = manuals[i];
+        const mArea = manR.area || Math.abs(FC.polygonArea(manR.polygon));
+        const mCent = manR.centroid || FC.polygonCentroid(manR.polygon);
+        const areaRatio = Math.min(aArea, mArea) / Math.max(aArea, mArea, 0.01);
+        const distC = FC.dist(aCent, mCent);
+        if (
+          (distC < 0.85 && areaRatio > 0.55) ||
+          (areaRatio > 0.7 && (FC.pointInPolygon(aCent, manR.polygon) || FC.pointInPolygon(mCent, autoR.polygon)))
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+    return manuals.concat(keptAutos).sort((a, b) => (b.area || 0) - (a.area || 0));
+  };
+
+  FC.snapRoomPolygons = function (plan, rooms) {
+    if (!plan) return 0;
+    const targetRooms = Array.isArray(rooms) ? rooms : plan.rooms || [];
+    if (!targetRooms.length) return 0;
+
+    const segs = FC.getSegments(plan);
+    const refPts = [];
+    (plan.outline || []).forEach((p) => refPts.push({ x: p.x, y: p.y }));
+    (plan.walls || []).forEach((w) => {
+      if (w && w.a && w.b) {
+        refPts.push({ x: w.a.x, y: w.a.y });
+        refPts.push({ x: w.b.x, y: w.b.y });
+      }
+    });
+
+    const isAtRefCorner = (pt, tol) => {
+      const t = tol || 0.005;
+      for (let i = 0; i < refPts.length; i++) {
+        if (FC.dist(pt, refPts[i]) <= t) return refPts[i];
+      }
+      return null;
+    };
+
+    const isOnSeg = (pt, tol) => {
+      const t = tol || 0.008;
+      let best = null;
+      for (let i = 0; i < segs.length; i++) {
+        const h = FC.pointSegment(pt, segs[i].a, segs[i].b);
+        if (h.dist <= t && (!best || h.dist < best.dist)) {
+          best = { seg: segs[i], hit: h };
+        }
+      }
+      return best;
+    };
+
+    let snapCount = 0;
+
+    // Step 1: Snap room vertices to nearby reference corners (outline vertices & wall endpoints)
+    targetRooms.forEach((r) => {
+      if (!r || !Array.isArray(r.polygon) || r.polygon.length < 3) return;
+      const poly = r.polygon;
+      for (let i = 0; i < poly.length; i++) {
+        const p = poly[i];
+        let bestCorner = null;
+        let bestDist = 0.15;
+        for (let c = 0; c < refPts.length; c++) {
+          const d = FC.dist(p, refPts[c]);
+          if (d <= bestDist) {
+            bestDist = d;
+            bestCorner = refPts[c];
+          }
+        }
+        if (bestCorner && bestDist > 1e-4) {
+          p.x = FC.round(bestCorner.x, 4);
+          p.y = FC.round(bestCorner.y, 4);
+          snapCount++;
+        }
+      }
+    });
+
+    // Step 2: Snap non-corner room vertices to nearby wall/outline segments & rectify near-ortho open boundaries
+    targetRooms.forEach((r) => {
+      if (!r || !Array.isArray(r.polygon) || r.polygon.length < 3) return;
+      const poly = r.polygon;
+      const n = poly.length;
+      for (let i = 0; i < n; i++) {
+        const p = poly[i];
+        if (isAtRefCorner(p, 0.005)) continue;
+
+        let bestSeg = null;
+        let bestHit = null;
+        let bestDist = 0.15;
+        for (let s = 0; s < segs.length; s++) {
+          const h = FC.pointSegment(p, segs[s].a, segs[s].b);
+          if (h.dist <= bestDist) {
+            bestDist = h.dist;
+            bestSeg = segs[s];
+            bestHit = h;
+          }
+        }
+
+        if (bestSeg && bestHit) {
+          let nx = bestHit.point.x;
+          let ny = bestHit.point.y;
+          const segDx = Math.abs(bestSeg.b.x - bestSeg.a.x);
+          const segDy = Math.abs(bestSeg.b.y - bestSeg.a.y);
+          const isVertWall = segDx < 0.015 && segDy > 0.2;
+          const isHorizWall = segDy < 0.015 && segDx > 0.2;
+
+          const prev = poly[(i - 1 + n) % n];
+          const next = poly[(i + 1) % n];
+          const neighbors = [prev, next];
+
+          if (isVertWall) {
+            for (let k = 0; k < 2; k++) {
+              const nb = neighbors[k];
+              if (Math.abs(nb.x - nx) > 0.5 && Math.abs(p.y - nb.y) < 0.10) {
+                const tCheck = (nb.y - bestSeg.a.y) / (bestSeg.b.y - bestSeg.a.y);
+                if (tCheck >= -0.02 && tCheck <= 1.02) {
+                  ny = nb.y;
+                  break;
+                }
+              }
+            }
+          } else if (isHorizWall) {
+            for (let k = 0; k < 2; k++) {
+              const nb = neighbors[k];
+              if (Math.abs(nb.y - ny) > 0.5 && Math.abs(p.x - nb.x) < 0.10) {
+                const tCheck = (nb.x - bestSeg.a.x) / (bestSeg.b.x - bestSeg.a.x);
+                if (tCheck >= -0.02 && tCheck <= 1.02) {
+                  nx = nb.x;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (Math.hypot(nx - p.x, ny - p.y) > 1e-4) {
+            p.x = FC.round(nx, 4);
+            p.y = FC.round(ny, 4);
+            snapCount++;
+          }
+        }
+      }
+    });
+
+    // Step 3: Weld nearby vertices across adjacent rooms so shared boundaries are flush
+    const scoreVertex = (poly, idx) => {
+      const pt = poly[idx];
+      let sc = 0;
+      if (isAtRefCorner(pt, 0.005)) sc += 8;
+      if (isOnSeg(pt, 0.008)) sc += 4;
+      const n = poly.length;
+      const prev = poly[(idx - 1 + n) % n];
+      const next = poly[(idx + 1) % n];
+      if (Math.abs(pt.x - prev.x) < 0.002 || Math.abs(pt.y - prev.y) < 0.002) sc += 2;
+      if (Math.abs(pt.x - next.x) < 0.002 || Math.abs(pt.y - next.y) < 0.002) sc += 2;
+      return sc;
+    };
+
+    for (let a = 0; a < targetRooms.length; a++) {
+      const rA = targetRooms[a];
+      if (!rA || !Array.isArray(rA.polygon)) continue;
+      for (let b = a + 1; b < targetRooms.length; b++) {
+        const rB = targetRooms[b];
+        if (!rB || !Array.isArray(rB.polygon)) continue;
+        for (let i = 0; i < rA.polygon.length; i++) {
+          const pA = rA.polygon[i];
+          for (let j = 0; j < rB.polygon.length; j++) {
+            const pB = rB.polygon[j];
+            const d = FC.dist(pA, pB);
+            if (d > 1e-4 && d <= 0.15) {
+              const cornerA = isAtRefCorner(pA, 0.005);
+              const cornerB = isAtRefCorner(pB, 0.005);
+              if (cornerA && cornerB) continue; // Both are distinct structural corners
+              const sA = scoreVertex(rA.polygon, i);
+              const sB = scoreVertex(rB.polygon, j);
+              if (sA >= sB) {
+                pB.x = pA.x;
+                pB.y = pA.y;
+              } else {
+                pA.x = pB.x;
+                pA.y = pB.y;
+              }
+              snapCount++;
+            }
+          }
+        }
+      }
+    }
+
+    // Step 4: Recompute metadata and sync manualRooms
+    const manualById = new Map();
+    if (Array.isArray(plan.manualRooms)) {
+      plan.manualRooms.forEach((mr) => {
+        if (mr && mr.id) manualById.set(mr.id, mr);
+      });
+    }
+
+    targetRooms.forEach((r) => {
+      if (!r || !Array.isArray(r.polygon) || r.polygon.length < 3) return;
+      const clean = FC.dedupePolygon(r.polygon);
+      if (clean.length >= 3) {
+        r.polygon = clean;
+        r.area = FC.round(Math.abs(FC.polygonArea(clean)), 2);
+        r.centroid = FC.polygonCentroid(clean);
+        r.bounds = FC.polygonBounds(clean);
+        const mr = manualById.get(r.id);
+        if (mr) {
+          mr.polygon = clean.map((p) => ({ x: p.x, y: p.y }));
+          mr.area = r.area;
+          mr.centroid = { x: r.centroid.x, y: r.centroid.y };
+          mr.bounds = Object.assign({}, r.bounds);
+        }
+      }
+    });
+
+    return snapCount;
   };
 
   function matchPreviousRoom(room, prev) {
@@ -2329,6 +2591,7 @@
     island: { archetype: 'floating-zone', clearance: 0.9 },
 
     // Elevated wall mounts
+    tv: { archetype: 'relative-stacked', parentKind: 'tvConsole', elev: 0.92, blocksWindow: 'always' },
     rangeHood: { archetype: 'relative-stacked', parentKind: 'ovenRange', elev: 1.55 },
     mirrorCabinet: { archetype: 'relative-stacked', parentKind: 'vanity', elev: 1.35 },
     towelRack: { archetype: 'wall-perimeter', elev: 0.80 },
@@ -2485,17 +2748,22 @@
   FC.itemBlocksDoor = function (item, doorZones) {
     if (FC.isNonSolid(item)) return false;
     const corners = FC.itemCorners(item, 0.02);
+    const center = { x: item.x, y: item.y };
     for (let d = 0; d < doorZones.length; d++) {
       const dz = doorZones[d];
-      if (Math.hypot(item.x - dz.x, item.y - dz.y) < dz.radius) return true;
+      const da = dz.a || { x: dz.x, y: dz.y };
+      const db = dz.b || { x: dz.x, y: dz.y };
+      if (FC.pointSegment(center, da, db).dist < dz.radius) return true;
       for (let i = 0; i < 4; i++) {
-        if (Math.hypot(corners[i].x - dz.x, corners[i].y - dz.y) < dz.radius) return true;
+        if (FC.pointSegment(corners[i], da, db).dist < dz.radius) return true;
       }
       for (let i = 0; i < 4; i++) {
         const c1 = corners[i];
         const c2 = corners[(i + 1) % 4];
-        const h = FC.pointSegment({ x: dz.x, y: dz.y }, c1, c2);
-        if (h.dist < dz.radius) return true;
+        if (FC.segmentIntersection(c1, c2, da, db)) return true;
+        if (FC.pointSegment({ x: dz.x, y: dz.y }, c1, c2).dist < dz.radius) return true;
+        if (FC.pointSegment(da, c1, c2).dist < dz.radius) return true;
+        if (FC.pointSegment(db, c1, c2).dist < dz.radius) return true;
       }
     }
     return false;
@@ -2704,17 +2972,21 @@
       const p2 = poly[(i + 1) % n];
       const len = FC.dist(p1, p2);
       if (len < 0.5) continue;
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const ux = dx / len;
+      const uy = dy / len;
       const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+      let fullMatched = false;
       for (let s = 0; s < wallSegs.length; s++) {
         const seg = wallSegs[s];
         const h1 = FC.pointSegment(p1, seg.a, seg.b);
         const h2 = FC.pointSegment(p2, seg.a, seg.b);
         const hm = FC.pointSegment(mid, seg.a, seg.b);
         if (h1.dist < 0.15 && h2.dist < 0.15 && hm.dist < 0.15) {
-          const dx = p2.x - p1.x;
-          const dy = p2.y - p1.y;
-          let nx = -dy / len;
-          let ny = dx / len;
+          let nx = -uy;
+          let ny = ux;
           const testPt = { x: mid.x + nx * 0.15, y: mid.y + ny * 0.15 };
           if (!FC.pointInPolygon(testPt, room.polygon)) {
             nx = -nx;
@@ -2725,7 +2997,43 @@
             rot: Math.atan2(ny, nx) - Math.PI / 2,
             seg
           });
+          fullMatched = true;
           break;
+        }
+      }
+
+      if (!fullMatched) {
+        for (let s = 0; s < wallSegs.length; s++) {
+          const seg = wallSegs[s];
+          if (!seg || seg.len < 0.4) continue;
+          const sdx = seg.b.x - seg.a.x;
+          const sdy = seg.b.y - seg.a.y;
+          const cross = Math.abs(sdx * uy - sdy * ux) / seg.len;
+          if (cross > 0.14) continue;
+          const perpDist = Math.abs((seg.a.x - p1.x) * uy - (seg.a.y - p1.y) * ux);
+          if (perpDist > 0.15) continue;
+          const tA = (seg.a.x - p1.x) * ux + (seg.a.y - p1.y) * uy;
+          const tB = (seg.b.x - p1.x) * ux + (seg.b.y - p1.y) * uy;
+          const t0 = Math.max(0, Math.min(tA, tB));
+          const t1 = Math.min(len, Math.max(tA, tB));
+          const subLen = t1 - t0;
+          if (subLen >= 0.5) {
+            const q1 = { x: p1.x + ux * t0, y: p1.y + uy * t0 };
+            const q2 = { x: p1.x + ux * t1, y: p1.y + uy * t1 };
+            const subMid = { x: (q1.x + q2.x) / 2, y: (q1.y + q2.y) / 2 };
+            let nx = -uy;
+            let ny = ux;
+            const testPt = { x: subMid.x + nx * 0.15, y: subMid.y + ny * 0.15 };
+            if (!FC.pointInPolygon(testPt, room.polygon)) {
+              nx = -nx;
+              ny = -ny;
+            }
+            matched.push({
+              p1: q1, p2: q2, len: subLen, mid: subMid, nx, ny,
+              rot: Math.atan2(ny, nx) - Math.PI / 2,
+              seg
+            });
+          }
         }
       }
     }
@@ -2832,13 +3140,25 @@
       if (pl) {
         let r = 0.8;
         if (d.kind === 'opening') {
-          r = Math.max(0.75, (pl.width || 0.9) * 0.7);
+          r = Math.max(0.75, (pl.width || 0.9) * 0.55);
         } else if (d.style === 'sliding' || d.style === 'bifold') {
-          r = 0.65;
+          r = 0.75;
         } else {
-          r = Math.min(0.85, Math.max(0.65, (pl.width || 0.8) * 0.85));
+          r = Math.min(0.85, Math.max(0.7, (pl.width || 0.8) * 0.85));
         }
-        doorZones.push({ x: pl.x, y: pl.y, radius: r, door: d });
+        const halfW = Math.max(0.1, ((pl.width || 0.8) - 0.1) / 2);
+        const dx = Math.cos(pl.angle || 0) * halfW;
+        const dy = Math.sin(pl.angle || 0) * halfW;
+        doorZones.push({
+          x: pl.x,
+          y: pl.y,
+          a: { x: pl.x - dx, y: pl.y - dy },
+          b: { x: pl.x + dx, y: pl.y + dy },
+          width: pl.width || 0.8,
+          angle: pl.angle || 0,
+          radius: r,
+          door: d,
+        });
       }
     });
     return doorZones;
@@ -2962,14 +3282,40 @@
         return item;
       }
 
-      // Try small positional nudges if allowed
-      if (opts.canNudge !== false) {
-        const deltas = [
-          { dx: 0, dy: 0.2 }, { dx: 0, dy: -0.2 },
-          { dx: 0.2, dy: 0 }, { dx: -0.2, dy: 0 },
-          { dx: 0, dy: 0.4 }, { dx: 0, dy: -0.4 },
-          { dx: 0.4, dy: 0 }, { dx: -0.4, dy: 0 }
-        ];
+      // Try small positional nudges if allowed. Wall-mounted pieces must never be
+      // pushed off their wall (which would leave them floating in front of a door or window).
+      const rule = (FC.ITEM_RULES && FC.ITEM_RULES[kind]) || {};
+      const isWallItem = rule.archetype === 'wall-perimeter';
+      const noNudge =
+        rule.archetype === 'relative-stacked' ||
+        kind === 'tvConsole' ||
+        kind === 'tv' ||
+        kind === 'fireplace' ||
+        kind === 'artwork' ||
+        kind === 'fullMirror' ||
+        kind === 'mirrorCabinet' ||
+        kind === 'upperCabinets' ||
+        kind === 'rangeHood';
+      if (opts.canNudge !== false && !noNudge) {
+        let deltas;
+        if (isWallItem) {
+          // Wall-perimeter items may only slide parallel to their wall, never into the middle of the room
+          const ux = Math.cos(rot || 0);
+          const uy = Math.sin(rot || 0);
+          deltas = [
+            { dx: ux * 0.2, dy: uy * 0.2 },
+            { dx: -ux * 0.2, dy: -uy * 0.2 },
+            { dx: ux * 0.4, dy: uy * 0.4 },
+            { dx: -ux * 0.4, dy: -uy * 0.4 },
+          ];
+        } else {
+          deltas = [
+            { dx: 0, dy: 0.2 }, { dx: 0, dy: -0.2 },
+            { dx: 0.2, dy: 0 }, { dx: -0.2, dy: 0 },
+            { dx: 0, dy: 0.4 }, { dx: 0, dy: -0.4 },
+            { dx: 0.4, dy: 0 }, { dx: -0.4, dy: 0 },
+          ];
+        }
         for (let i = 0; i < deltas.length; i++) {
           const testItem = Object.assign({}, item, {
             x: FC.round(x + deltas[i].dx, 3),
@@ -3563,51 +3909,138 @@
         }
       } else {
         // Living room in primary zone
+        const roomWins = FC.findRoomWindows(room, plan, wallSegments);
         const sofaW = clamp(W * 0.35, 1.8, 2.4);
         const sofaY = y1 - 0.65;
+        const tvConW = Math.min(1.9, sofaW);
+        let loungeCenter = { x: cx, y: sofaY };
+
+        const placeTvPair = (tvW) => {
+          if (!tvW) return null;
+          const con = add(room, 'tvConsole', tvW.x, tvW.y, tvW.w, tvW.d, tvW.rot, { mat: 'wood', canNudge: false });
+          if (con) {
+            const nx = tvW.nx != null ? tvW.nx : -Math.sin(con.rot);
+            const ny = tvW.ny != null ? tvW.ny : Math.cos(con.rot);
+            add(room, 'tv', con.x - nx * 0.08, con.y - ny * 0.08, Math.min(1.3, con.w * 0.7), 0.07, con.rot, {
+              mat: 'screen',
+              elev: 0.92,
+              h: 0.78,
+              canNudge: false,
+            });
+          }
+          return con;
+        };
+
+        let placedCornerSec = false;
         if (variant === 0 && room.area >= 16) {
-          // Attempt corner placement for sectional sofa first, else primary zone
           const secW = Math.min(2.5, sofaW + 0.3);
-          const secCorner = FC.findCornerPlacement(room, 'sectionalSofa', secW, 1.8, items, doorZones, null, wallSegments);
+          const secCorner = FC.findCornerPlacement(room, 'sectionalSofa', secW, 1.8, items, doorZones, roomWins, wallSegments);
           if (secCorner) {
+            placedCornerSec = true;
+            loungeCenter = { x: secCorner.x, y: secCorner.y };
             add(room, 'rug', secCorner.x, secCorner.y, Math.min(3.2, W * 0.7), Math.min(2.4, D * 0.65), secCorner.rot, { mat: 'rug' });
             add(room, 'sectionalSofa', secCorner.x, secCorner.y, secW, 1.8, secCorner.rot, { mat: 'fabric' });
             add(room, 'coffeeTable', secCorner.x + 0.4 * Math.cos(secCorner.rot), secCorner.y + 0.4 * Math.sin(secCorner.rot), 1.05, 0.55, secCorner.rot, { mat: 'wood' });
-            const tvW = FC.findWallPlacement(plan, room, wallSegments, 'tvConsole', Math.min(1.9, sofaW), 0.42, items, doorZones);
-            if (tvW) {
-              add(room, 'tvConsole', tvW.x, tvW.y, tvW.w, tvW.d, tvW.rot, { mat: 'wood' });
-              add(room, 'tv', tvW.x, tvW.y, Math.min(1.3, tvW.w * 0.7), 0.07, tvW.rot, { mat: 'screen', elev: 0.92, h: 0.78 });
-            }
-          } else {
-            add(room, 'rug', cx, cy, Math.min(3.2, W * 0.7), Math.min(2.4, D * 0.65), 0, { mat: 'rug' });
-            add(room, 'sectionalSofa', cx, sofaY, secW, 1.8, Math.PI, { mat: 'fabric' });
-            add(room, 'coffeeTable', cx, Math.max(y0 + 1.1, sofaY - 1.15), 1.05, 0.55, 0, { mat: 'wood' });
-            add(room, 'tvConsole', cx, y0 + 0.28, Math.min(1.9, sofaW), 0.42, 0, { mat: 'wood' });
-            add(room, 'tv', cx, y0 + 0.15, Math.min(1.3, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
+            const tvW =
+              FC.findWallPlacement(
+                plan,
+                room,
+                wallSegments,
+                'tvConsole',
+                tvConW,
+                0.42,
+                items,
+                doorZones,
+                (w) => FC.pointInPolygon({ x: w.mid.x + w.nx * 2.0, y: w.mid.y + w.ny * 2.0 }, room.polygon),
+                roomWins,
+                rawVar
+              ) || FC.findWallPlacement(plan, room, wallSegments, 'tvConsole', tvConW, 0.42, items, doorZones, null, roomWins, rawVar);
+            placeTvPair(tvW);
+            add(room, 'floorLamp', secCorner.x + 1.3, secCorner.y - 0.15, 0.4, 0.4, 0, { mat: 'metal', decor: true });
           }
-          add(room, 'floorLamp', cx + 1.3, sofaY - 0.15, 0.4, 0.4, 0, { mat: 'metal', decor: true });
-        } else if (variant === 0) {
-          add(room, 'rug', cx, cy, Math.min(2.8, sofaW + 0.4), Math.min(2.0, D * 0.6), 0, { mat: 'rug' });
-          add(room, 'sofa', cx, sofaY, sofaW, 0.9, Math.PI, { mat: 'fabric' });
-          add(room, 'coffeeTable', cx, Math.max(y0 + 1.1, sofaY - 1.15), 1.0, 0.55, 0, { mat: 'wood' });
-          add(room, 'tvConsole', cx, y0 + 0.28, Math.min(1.9, sofaW), 0.42, 0, { mat: 'wood' });
-          add(room, 'tv', cx, y0 + 0.15, Math.min(1.3, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
-          add(room, 'floorLamp', cx + sofaW / 2 + 0.25, sofaY, 0.4, 0.4, 0, { mat: 'metal', decor: true });
-        } else if (variant === 1) {
-          add(room, 'rug', cx, cy, Math.min(3.0, sofaW + 0.6), Math.min(2.2, D * 0.65), 0, { mat: 'rug' });
-          add(room, 'sofa', cx, sofaY, sofaW, 0.88, Math.PI, { mat: 'fabric' });
-          add(room, 'coffeeTable', cx, cy, 1.05, 0.55, 0, { mat: 'wood' });
-          add(room, 'armchair', cx - sofaW * 0.38, cy - 0.75, 0.85, 0.85, 0.15, { mat: 'fabric' });
-          add(room, 'armchair', cx + sofaW * 0.38, cy - 0.75, 0.85, 0.85, -0.15, { mat: 'fabric' });
-          add(room, 'tvConsole', cx, y0 + 0.28, Math.min(1.8, sofaW), 0.4, 0, { mat: 'wood' });
-          add(room, 'tv', cx, y0 + 0.15, Math.min(1.3, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
-        } else {
-          add(room, 'rug', cx, cy, Math.min(3.0, sofaW + 0.5), Math.min(2.2, D * 0.6), 0, { mat: 'rug' });
-          add(room, 'sofa', cx, sofaY, sofaW, 0.9, Math.PI, { mat: 'fabric' });
-          add(room, 'armchair', cx - sofaW / 2 + 0.2, cy + 0.1, 0.85, 0.85, -Math.PI / 2, { mat: 'fabric' });
-          add(room, 'coffeeTable', cx + 0.2, cy, 0.95, 0.55, 0, { mat: 'wood' });
-          add(room, 'tvConsole', cx, y0 + 0.26, Math.min(1.9, sofaW), 0.42, 0, { mat: 'wood' });
-          add(room, 'tv', cx, y0 + 0.15, Math.min(1.3, sofaW * 0.7), 0.07, 0, { mat: 'screen', elev: 0.92, h: 0.78 });
+        }
+
+        if (!placedCornerSec) {
+          // Find a valid unobstructed wall for the TV console first (preferring walls with open depth in front)
+          const tvW =
+            FC.findWallPlacement(
+              plan,
+              room,
+              wallSegments,
+              'tvConsole',
+              tvConW,
+              0.42,
+              items,
+              doorZones,
+              (w) => FC.pointInPolygon({ x: w.mid.x + w.nx * 2.2, y: w.mid.y + w.ny * 2.2 }, room.polygon),
+              roomWins,
+              rawVar
+            ) || FC.findWallPlacement(plan, room, wallSegments, 'tvConsole', tvConW, 0.42, items, doorZones, null, roomWins, rawVar);
+
+          const tvCon = placeTvPair(tvW);
+
+          // Determine orientation of the primary seating group so it faces the TV wall (or fallback to top wall)
+          let nx = 0, ny = 1, baseRot = 0;
+          let anchorX = cx, anchorY = y0 + 0.25;
+          if (tvCon && tvW) {
+            nx = tvW.nx != null ? tvW.nx : -Math.sin(tvCon.rot);
+            ny = tvW.ny != null ? tvW.ny : Math.cos(tvCon.rot);
+            baseRot = tvCon.rot;
+            anchorX = tvCon.x;
+            anchorY = tvCon.y;
+          }
+          const ux = Math.cos(baseRot);
+          const uy = Math.sin(baseRot);
+          const sofaRot = FC.round(baseRot + Math.PI, 3);
+
+          // Compute comfortable seating distance in front of the TV wall
+          const maxDepth = Math.abs(nx) > Math.abs(ny) ? W : D;
+          const sofaDist = clamp(maxDepth * 0.58, 2.3, 3.3);
+          const ctDist = clamp(sofaDist - 1.15, 1.25, 2.1);
+          const rugDist = (sofaDist + ctDist) * 0.5;
+
+          const sx = anchorX + nx * sofaDist;
+          const sy = anchorY + ny * sofaDist;
+          const ctx = anchorX + nx * ctDist;
+          const cty = anchorY + ny * ctDist;
+          const rx = anchorX + nx * rugDist;
+          const ry = anchorY + ny * rugDist;
+          loungeCenter = { x: sx, y: sy };
+
+          if (variant === 0 && room.area >= 16) {
+            const secW = Math.min(2.5, sofaW + 0.3);
+            add(room, 'rug', rx, ry, Math.min(3.2, W * 0.7), Math.min(2.4, D * 0.65), baseRot, { mat: 'rug' });
+            const placedSofa =
+              add(room, 'sectionalSofa', sx, sy, secW, 1.8, sofaRot, { mat: 'fabric' }) ||
+              add(room, 'sofa', sx, sy, sofaW, 0.9, sofaRot, { mat: 'fabric' }) ||
+              add(room, 'sofa', cx, sofaY, sofaW, 0.9, sofaRot, { mat: 'fabric' });
+            add(room, 'coffeeTable', ctx, cty, 1.05, 0.55, baseRot, { mat: 'wood' });
+            if (placedSofa) {
+              add(room, 'floorLamp', placedSofa.x + ux * (sofaW / 2 + 0.35), placedSofa.y + uy * (sofaW / 2 + 0.35), 0.4, 0.4, 0, { mat: 'metal', decor: true });
+            }
+          } else if (variant === 0) {
+            add(room, 'rug', rx, ry, Math.min(2.8, sofaW + 0.4), Math.min(2.0, D * 0.6), baseRot, { mat: 'rug' });
+            const placedSofa =
+              add(room, 'sofa', sx, sy, sofaW, 0.9, sofaRot, { mat: 'fabric' }) ||
+              add(room, 'sofa', cx, sofaY, sofaW, 0.9, sofaRot, { mat: 'fabric' });
+            add(room, 'coffeeTable', ctx, cty, 1.0, 0.55, baseRot, { mat: 'wood' });
+            if (placedSofa) {
+              add(room, 'floorLamp', placedSofa.x + ux * (sofaW / 2 + 0.3), placedSofa.y + uy * (sofaW / 2 + 0.3), 0.4, 0.4, 0, { mat: 'metal', decor: true });
+            }
+          } else if (variant === 1) {
+            add(room, 'rug', rx, ry, Math.min(3.0, sofaW + 0.6), Math.min(2.2, D * 0.65), baseRot, { mat: 'rug' });
+            add(room, 'sofa', sx, sy, sofaW, 0.88, sofaRot, { mat: 'fabric' }) ||
+              add(room, 'sofa', cx, sofaY, sofaW, 0.88, sofaRot, { mat: 'fabric' });
+            add(room, 'coffeeTable', ctx, cty, 1.05, 0.55, baseRot, { mat: 'wood' });
+            add(room, 'armchair', ctx - ux * (sofaW * 0.48), cty - uy * (sofaW * 0.48), 0.85, 0.85, baseRot + Math.PI / 2, { mat: 'fabric' });
+            add(room, 'armchair', ctx + ux * (sofaW * 0.48), cty + uy * (sofaW * 0.48), 0.85, 0.85, baseRot - Math.PI / 2, { mat: 'fabric' });
+          } else {
+            add(room, 'rug', rx, ry, Math.min(3.0, sofaW + 0.5), Math.min(2.2, D * 0.6), baseRot, { mat: 'rug' });
+            add(room, 'sofa', sx, sy, sofaW, 0.9, sofaRot, { mat: 'fabric' }) ||
+              add(room, 'sofa', cx, sofaY, sofaW, 0.9, sofaRot, { mat: 'fabric' });
+            add(room, 'armchair', ctx - ux * (sofaW * 0.5), cty - uy * (sofaW * 0.5), 0.85, 0.85, baseRot + Math.PI / 2, { mat: 'fabric' });
+            add(room, 'coffeeTable', ctx + ux * 0.15, cty + uy * 0.15, 0.95, 0.55, baseRot, { mat: 'wood' });
+          }
         }
 
         // Modern linear fireplace along perimeter wall
@@ -3631,7 +4064,6 @@
         // Secondary area utilization in large living rooms (e.g. Great Room >= 32m2):
         if (room.area >= 32) {
           const b = room.bounds || FC.polygonBounds(room.polygon);
-          const loungeCenter = { x: cx, y: sofaY };
           let bestSecAnchor = null;
           let maxSecDist = 0;
           for (let sx = b.x0 + 1.2; sx <= b.x1 - 1.2; sx += 0.8) {
@@ -3672,6 +4104,62 @@
     });
 
     return items.filter((i) => !i.decor || density >= 0.7);
+  };
+
+  FC.sanitizeFurniture = function (plan, rooms) {
+    if (!plan || !Array.isArray(plan.furniture) || !plan.furniture.length) return;
+    const roomList = Array.isArray(rooms) && rooms.length ? rooms : plan.rooms || [];
+    if (!roomList.length) return;
+    const validRoomIds = new Set(roomList.map((r) => r.id));
+    // Remove orphaned auto-generated furniture from deduplicated rooms
+    plan.furniture = plan.furniture.filter((f) => !f.roomId || validRoomIds.has(f.roomId) || f.custom);
+
+    const wallSegments = FC.getSegments(plan);
+    const doorZones = FC.findDoorZones(plan, wallSegments);
+
+    plan.furniture.forEach((con) => {
+      if (con.kind !== 'tvConsole') return;
+      const room = roomList.find((r) => r.id === con.roomId) || roomList.find((r) => FC.pointInPolygon({ x: con.x, y: con.y }, r.polygon));
+      if (!room) return;
+      const roomWins = FC.findRoomWindows(room, plan, wallSegments);
+      const nearWall = FC.nearestWall(plan, { x: con.x, y: con.y }, 0.42);
+      const invalid =
+        !nearWall ||
+        FC.itemBlocksDoor(con, doorZones) ||
+        FC.itemBlocksWindow(con, roomWins);
+      if (!invalid) return;
+
+      const pairedTv = plan.furniture.find((f) => f.kind === 'tv' && (f.roomId === room.id || Math.hypot(f.x - con.x, f.y - con.y) < 1.2));
+      const otherItems = plan.furniture.filter((f) => f !== con && f !== pairedTv);
+      const tvW =
+        FC.findWallPlacement(
+          plan,
+          room,
+          wallSegments,
+          'tvConsole',
+          con.w || 1.8,
+          con.d || 0.42,
+          otherItems,
+          doorZones,
+          (w) => FC.pointInPolygon({ x: w.mid.x + w.nx * 2.0, y: w.mid.y + w.ny * 2.0 }, room.polygon),
+          roomWins,
+          room.layoutVariant || 0
+        ) ||
+        FC.findWallPlacement(plan, room, wallSegments, 'tvConsole', con.w || 1.8, con.d || 0.42, otherItems, doorZones, null, roomWins, room.layoutVariant || 0);
+
+      if (tvW) {
+        con.x = tvW.x;
+        con.y = tvW.y;
+        con.rot = tvW.rot;
+        if (pairedTv) {
+          const nx = tvW.nx != null ? tvW.nx : -Math.sin(tvW.rot);
+          const ny = tvW.ny != null ? tvW.ny : Math.cos(tvW.rot);
+          pairedTv.x = FC.round(tvW.x - nx * 0.08, 3);
+          pairedTv.y = FC.round(tvW.y - ny * 0.08, 3);
+          pairedTv.rot = tvW.rot;
+        }
+      }
+    });
   };
 
   FC.furnitureCount = function (items) {
