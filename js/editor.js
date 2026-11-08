@@ -804,11 +804,21 @@
           return;
         }
         if (hit.type === 'furniture') {
+          const curSel = this.app.ui.selection;
+          if (!e.shiftKey && curSel && curSel.type === 'walls' && Array.isArray(curSel.furnitureIds) && curSel.furnitureIds.includes(hit.furniture.id)) {
+            this.drag = { type: 'walls-group', startW: { x: w.x, y: w.y }, moved: false, pushed: false };
+            return;
+          }
           this.app.select({ type: 'furniture', id: hit.furniture.id });
           this.drag = { type: 'furniture', furniture: hit.furniture, startW: { x: w.x, y: w.y }, orig: { x: hit.furniture.x, y: hit.furniture.y }, moved: false, pushed: false };
           return;
         }
         if (hit.type === 'light') {
+          const curSel = this.app.ui.selection;
+          if (!e.shiftKey && curSel && curSel.type === 'walls' && Array.isArray(curSel.lightIds) && curSel.lightIds.includes(hit.light.id)) {
+            this.drag = { type: 'walls-group', startW: { x: w.x, y: w.y }, moved: false, pushed: false };
+            return;
+          }
           this.app.select({ type: 'light', id: hit.light.id });
           this.drag = { type: 'light', light: hit.light, startW: { x: w.x, y: w.y }, orig: { x: hit.light.x, y: hit.light.y }, moved: false, pushed: false };
           return;
@@ -838,13 +848,17 @@
           }
         }
         if (hit.type === 'wall') {
+          const curSel = this.app.ui.selection;
           if (e.shiftKey) {
             let currentKeys = [];
             let currentIds = [];
-            const curSel = this.app.ui.selection;
+            let furnitureIds = [];
+            let lightIds = [];
             if (curSel && curSel.type === 'walls') {
               currentKeys = curSel.keys.slice();
               currentIds = (curSel.ids || []).slice();
+              furnitureIds = (curSel.furnitureIds || []).slice();
+              lightIds = (curSel.lightIds || []).slice();
             } else if (curSel && curSel.type === 'wall' && curSel.key) {
               currentKeys = [curSel.key];
               const curSeg = FC.segmentByKey(this.app.plan, curSel.key);
@@ -859,8 +873,8 @@
               currentKeys.push(key);
               if (id && !currentIds.includes(id)) currentIds.push(id);
             }
-            if (currentKeys.length > 1) {
-              this.app.select({ type: 'walls', keys: currentKeys, ids: currentIds });
+            if (currentKeys.length > 1 || (currentKeys.length >= 1 && (furnitureIds.length || lightIds.length))) {
+              this.app.select({ type: 'walls', keys: currentKeys, ids: currentIds, furnitureIds, lightIds });
               return;
             } else if (currentKeys.length === 1) {
               this.app.select({ type: 'wall', key: currentKeys[0] });
@@ -869,6 +883,10 @@
               this.app.clearSelection();
               return;
             }
+          }
+          if (curSel && curSel.type === 'walls' && Array.isArray(curSel.keys) && curSel.keys.includes(hit.seg.key)) {
+            this.drag = { type: 'walls-group', startW: { x: w.x, y: w.y }, moved: false, pushed: false };
+            return;
           }
           this.app.select({ type: 'wall', key: hit.seg.key });
           this.drag = { type: 'wall', key: hit.seg.key, seg: hit.seg, startW: { x: w.x, y: w.y }, moved: false, pushed: false };
@@ -1145,13 +1163,36 @@
                 if (seg.id) matchedIds.push(seg.id);
               }
             });
-            if (matchedKeys.length > 1) {
-              this.app.select({ type: 'walls', keys: matchedKeys, ids: matchedIds });
+            const matchedFurnIds = [];
+            if (this.app.furniture && this.app.plan.furnished) {
+              this.app.furniture.forEach((f) => {
+                if (f.x >= minX && f.x <= maxX && f.y >= minY && f.y <= maxY) {
+                  matchedFurnIds.push(f.id);
+                }
+              });
+            }
+            const matchedLightIds = [];
+            if (this.app.plan.lights) {
+              this.app.plan.lights.forEach((l) => {
+                if (l.x >= minX && l.x <= maxX && l.y >= minY && l.y <= maxY) {
+                  matchedLightIds.push(l.id);
+                }
+              });
+            }
+            if (matchedKeys.length > 1 || (matchedKeys.length >= 1 && (matchedFurnIds.length || matchedLightIds.length)) || matchedFurnIds.length > 1) {
+              this.app.select({
+                type: 'walls',
+                keys: matchedKeys,
+                ids: matchedIds,
+                furnitureIds: matchedFurnIds,
+                lightIds: matchedLightIds,
+              });
             } else if (matchedKeys.length === 1) {
               this.app.select({ type: 'wall', key: matchedKeys[0] });
-            } else if (this.app.furniture && this.app.plan.furnished) {
-              const furn = this.app.furniture.find((f) => f.x >= minX && f.x <= maxX && f.y >= minY && f.y <= maxY);
-              if (furn) this.app.select({ type: 'furniture', id: furn.id });
+            } else if (matchedFurnIds.length === 1) {
+              this.app.select({ type: 'furniture', id: matchedFurnIds[0] });
+            } else if (matchedLightIds.length === 1) {
+              this.app.select({ type: 'light', id: matchedLightIds[0] });
             }
           }
           this.drag = null;
@@ -1204,6 +1245,70 @@
       if (this.drag.type === 'marquee') {
         this.drag.x1 = w.x;
         this.drag.y1 = w.y;
+        return;
+      }
+      if (this.drag.type === 'walls-group') {
+        if (!this.drag.pushed) {
+          this.app.pushHistory();
+          this.drag.pushed = true;
+        }
+        const sel = this.app.ui.selection;
+        if (!sel || sel.type !== 'walls') return;
+        if (!this.drag.startW) this.drag.startW = { x: w.x, y: w.y };
+        if (!this.drag.origWalls) {
+          this.drag.origWalls = new Map();
+          (sel.ids || []).forEach((wid) => {
+            const wall = plan.walls.find((x) => x.id === wid);
+            if (wall) {
+              this.drag.origWalls.set(wid, { a: { x: wall.a.x, y: wall.a.y }, b: { x: wall.b.x, y: wall.b.y } });
+            }
+          });
+          this.drag.origFurn = new Map();
+          if (this.app.furniture && Array.isArray(sel.furnitureIds)) {
+            sel.furnitureIds.forEach((fid) => {
+              const f = this.app.furniture.find((item) => item.id === fid);
+              if (f) this.drag.origFurn.set(fid, { x: f.x, y: f.y });
+            });
+          }
+          this.drag.origLights = new Map();
+          if (plan.lights && Array.isArray(sel.lightIds)) {
+            sel.lightIds.forEach((lid) => {
+              const l = plan.lights.find((item) => item.id === lid);
+              if (l) this.drag.origLights.set(lid, { x: l.x, y: l.y });
+            });
+          }
+        }
+        let dx = w.x - this.drag.startW.x;
+        let dy = w.y - this.drag.startW.y;
+        if (this.gridSnap && this.app.plan.settings.snapGrid !== false && !this.altDown) {
+          dx = this.snapGridValue(dx);
+          dy = this.snapGridValue(dy);
+        }
+        this.drag.origWalls.forEach((orig, wid) => {
+          const wall = plan.walls.find((x) => x.id === wid);
+          if (wall) {
+            wall.a.x = FC.round(orig.a.x + dx, 3);
+            wall.a.y = FC.round(orig.a.y + dy, 3);
+            wall.b.x = FC.round(orig.b.x + dx, 3);
+            wall.b.y = FC.round(orig.b.y + dy, 3);
+          }
+        });
+        this.drag.origFurn.forEach((orig, fid) => {
+          const f = (this.app.furniture || []).find((item) => item.id === fid);
+          if (f) {
+            f.x = FC.round(orig.x + dx, 3);
+            f.y = FC.round(orig.y + dy, 3);
+            f.custom = true;
+          }
+        });
+        this.drag.origLights.forEach((orig, lid) => {
+          const l = (plan.lights || []).find((item) => item.id === lid);
+          if (l) {
+            l.x = FC.round(orig.x + dx, 3);
+            l.y = FC.round(orig.y + dy, 3);
+          }
+        });
+        this.app.changed({ rooms: true, furniture: false, save: false });
         return;
       }
       if (this.drag.type === 'junction') {
@@ -1267,8 +1372,8 @@
         }
 
         if (snapGrid) {
-          if (!snappedVert) p.x = Math.round(p.x * 10) / 10;
-          if (!snappedHoriz) p.y = Math.round(p.y * 10) / 10;
+          if (!snappedVert) p.x = this.snapGridValue(p.x);
+          if (!snappedHoriz) p.y = this.snapGridValue(p.y);
         }
 
         if (snapGuide) {
@@ -1396,8 +1501,8 @@
         }
 
         if (snapGrid) {
-          if (!snappedVert) pt.x = Math.round(pt.x * 10) / 10;
-          if (!snappedHoriz) pt.y = Math.round(pt.y * 10) / 10;
+          if (!snappedVert) pt.x = this.snapGridValue(pt.x);
+          if (!snappedHoriz) pt.y = this.snapGridValue(pt.y);
         }
 
         if (snapGuide) {
@@ -1446,8 +1551,8 @@
         }
 
         if (snapGrid) {
-          if (!snappedVert) p.x = Math.round(p.x * 10) / 10;
-          if (!snappedHoriz) p.y = Math.round(p.y * 10) / 10;
+          if (!snappedVert) p.x = this.snapGridValue(p.x);
+          if (!snappedHoriz) p.y = this.snapGridValue(p.y);
         }
 
         if (snapGuide) {
@@ -1487,7 +1592,7 @@
         const tol = this.screenTol(14);
         let snapGuide = null;
         if (this.gridSnap && this.app.plan.settings.snapGrid !== false && !this.altDown) {
-          newLen = Math.round(newLen * 10) / 10;
+          newLen = this.snapGridValue(newLen);
         }
         if (!this.altDown) {
           const targetPt = { x: origin.x + u.x * newLen, y: origin.y + u.y * newLen };
@@ -1814,6 +1919,7 @@
       const w = this.updatePointer(e);
       const hit = this.hitTest(w);
       const items = [];
+      const clip = this.app.getClipboard ? this.app.getClipboard() : null;
 
       if (this.app.ui && this.app.ui.selection && this.app.ui.selection.type === 'walls') {
         const wallCount = this.app.ui.selection.keys ? this.app.ui.selection.keys.length : 2;
@@ -1827,14 +1933,30 @@
           icon: 'merge',
           action: () => this.app.mergeWalls(),
         });
+        items.push({ separator: true });
         items.push({
-          label: 'Duplicate selected walls',
+          label: 'Copy selected parts',
           icon: 'copy',
+          shortcut: 'Ctrl+C',
+          action: () => this.app.copySelection && this.app.copySelection(),
+        });
+        items.push({
+          label: 'Duplicate selected parts',
+          icon: 'plus',
           shortcut: 'Ctrl+D',
           action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
         });
+        if (clip) {
+          items.push({
+            label: 'Paste here',
+            icon: 'layers',
+            shortcut: 'Ctrl+V',
+            action: () => this.app.pasteClipboard && this.app.pasteClipboard(w),
+          });
+        }
+        items.push({ separator: true });
         items.push({
-          label: 'Delete selected walls',
+          label: 'Delete selected parts',
           icon: 'trash',
           danger: true,
           action: () => this.app.deleteSelection(),
@@ -1861,8 +1983,14 @@
         this.app.select({ type: 'opening', id: op.id });
         const label = FC.openingLabel(op);
         items.push({
-          label: 'Duplicate ' + label,
+          label: 'Copy ' + label,
           icon: 'copy',
+          shortcut: 'Ctrl+C',
+          action: () => this.app.copySelection && this.app.copySelection(),
+        });
+        items.push({
+          label: 'Duplicate ' + label,
+          icon: 'plus',
           shortcut: 'Ctrl+D',
           action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
         });
@@ -1873,6 +2001,7 @@
           action: () => this.app.deleteSelection(),
         });
         if (op.kind === 'door') {
+          items.push({ separator: true });
           items.push({
             label: 'Flip door swing',
             icon: 'refresh',
@@ -1909,8 +2038,14 @@
           action: () => this.app.rotateSelectedFurniture(Math.PI / 2),
         });
         items.push({
-          label: 'Duplicate ' + f.kind,
+          label: 'Copy ' + f.kind,
           icon: 'copy',
+          shortcut: 'Ctrl+C',
+          action: () => this.app.copySelection && this.app.copySelection(),
+        });
+        items.push({
+          label: 'Duplicate ' + f.kind,
+          icon: 'plus',
           shortcut: 'Ctrl+D',
           action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
         });
@@ -1924,8 +2059,14 @@
         const l = hit.light;
         this.app.select({ type: 'light', id: l.id });
         items.push({
-          label: 'Duplicate light',
+          label: 'Copy light',
           icon: 'copy',
+          shortcut: 'Ctrl+C',
+          action: () => this.app.copySelection && this.app.copySelection(),
+        });
+        items.push({
+          label: 'Duplicate light',
+          icon: 'plus',
           shortcut: 'Ctrl+D',
           action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
         });
@@ -1938,6 +2079,15 @@
       } else if (hit && hit.type === 'wall') {
         const seg = hit.seg;
         this.app.select({ type: 'wall', key: seg.key });
+        if (clip && clip.type === 'opening' && clip.opening) {
+          items.push({
+            label: `Paste ${FC.openingLabel(clip.opening)} here`,
+            icon: 'copy',
+            shortcut: 'Ctrl+V',
+            action: () => this.app.pasteClipboard && this.app.pasteClipboard(w, seg.key),
+          });
+          items.push({ separator: true });
+        }
         items.push({
           label: 'Add door here',
           icon: 'door',
@@ -1959,6 +2109,12 @@
             label: 'Insert corner here',
             icon: 'plus',
             action: () => this.app.insertOutlineCornerAt && this.app.insertOutlineCornerAt(seg.index, w),
+          });
+          items.push({
+            label: 'Copy wall',
+            icon: 'copy',
+            shortcut: 'Ctrl+C',
+            action: () => this.app.copySelection && this.app.copySelection(),
           });
         } else {
           const cand = seg.id && FC.findParallelWall ? FC.findParallelWall(this.app.plan, seg.id) : null;
@@ -1994,8 +2150,14 @@
             action: () => this.app.splitWallAt(seg.id, w),
           });
           items.push({
-            label: 'Duplicate wall',
+            label: 'Copy wall',
             icon: 'copy',
+            shortcut: 'Ctrl+C',
+            action: () => this.app.copySelection && this.app.copySelection(),
+          });
+          items.push({
+            label: 'Duplicate wall',
+            icon: 'plus',
             shortcut: 'Ctrl+D',
             action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
           });
@@ -2006,7 +2168,40 @@
             action: () => this.app.deleteSelection(),
           });
         }
+      } else if (hit && hit.type === 'room') {
+        const room = hit.room;
+        this.app.select({ type: 'room', id: room.id });
+        const rName = room.name || (FC.roomTypes[room.type] && FC.roomTypes[room.type].label) || 'Room';
+        items.push({
+          label: `Copy ${rName} (walls & contents)`,
+          icon: 'copy',
+          shortcut: 'Ctrl+C',
+          action: () => this.app.copySelection && this.app.copySelection(),
+        });
+        items.push({
+          label: `Duplicate ${rName}`,
+          icon: 'plus',
+          shortcut: 'Ctrl+D',
+          action: () => this.app.duplicateSelection && this.app.duplicateSelection(),
+        });
+        if (clip) {
+          items.push({
+            label: `Paste ${clip.type === 'opening' ? FC.openingLabel(clip.opening) : (clip.label || 'copied parts')} here`,
+            icon: 'layers',
+            shortcut: 'Ctrl+V',
+            action: () => this.app.pasteClipboard && this.app.pasteClipboard(w),
+          });
+        }
       } else {
+        if (clip) {
+          items.push({
+            label: `Paste ${clip.type === 'opening' ? FC.openingLabel(clip.opening) : (clip.label || 'copied parts')} here`,
+            icon: 'layers',
+            shortcut: 'Ctrl+V',
+            action: () => this.app.pasteClipboard && this.app.pasteClipboard(w),
+          });
+          items.push({ separator: true });
+        }
         items.push({
           label: 'Fit plan to screen',
           icon: 'expand',

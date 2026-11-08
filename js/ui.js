@@ -124,6 +124,23 @@
           if (this._modal) return;
           this.closeMenus();
         }
+        const el = e.target;
+        if (
+          el &&
+          el.matches &&
+          el.matches('input[data-setting]:not([type="range"]), input[data-op-field], input[data-wall-len]')
+        ) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            this.formatDimensionInput(el);
+            el.blur();
+            return;
+          }
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            this.stepDimensionInput(el, e.key === 'ArrowUp' ? 1 : -1, e.shiftKey);
+          }
+        }
       });
     }
 
@@ -476,18 +493,25 @@
       const fmtLen = (v) => (FC.formatLength ? FC.formatLength(v, plan) : FC.fmt(v, 2) + ' m');
       const fmtLenShort = (v, d = 2) => (FC.formatLengthShort ? FC.formatLengthShort(v, plan, d) : FC.fmt(v, d));
       const fmtThick = (v) => (FC.formatThickness ? FC.formatThickness(v, plan) : Math.round(v * 100) + ' cm');
+      const fmtInput = (v, opts) => (FC.formatInputLength ? FC.formatInputLength(v, plan, opts) : FC.fmt(v, 2));
+      const inUnit = (opts) => (FC.inputUnitLabel ? FC.inputUnitLabel(plan, opts) : 'm');
       const lenUnit = FC.lengthUnitLabel ? FC.lengthUnitLabel(plan) : 'm';
       const areaUnit = FC.areaUnitLabel ? FC.areaUnitLabel(plan) : 'm²';
       const isImp = FC.isImperial && FC.isImperial(plan);
+      const hasClip = !!(this.app.hasClipboard && this.app.hasClipboard());
 
       if (sel.type === 'walls') {
         const count = (sel.keys || []).length;
+        const furnCount = (sel.furnitureIds || []).length;
+        const lightCount = (sel.lightIds || []).length;
+        const extraParts = furnCount + lightCount;
         const allSegs = FC.getSegments(plan);
         const selectedSegs = (sel.keys || []).map((k) => allSegs.find((s) => s.key === k)).filter(Boolean);
         const totalLen = selectedSegs.reduce((sum, s) => sum + s.len, 0);
+        const titleText = extraParts > 0 ? `${count} walls + ${extraParts} items` : `${count} walls selected`;
         return `<div class="sel-card">
           <div class="sel-head">
-            <div><span class="eyebrow">Multi-selection</span><div class="sel-title">${count} walls selected</div></div>
+            <div><span class="eyebrow">Multi-selection</span><div class="sel-title">${titleText}</div></div>
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="sel-metrics two">
@@ -498,9 +522,13 @@
             <button class="btn primary sm" data-action="connect-selected-walls">${I('link')} Connect walls</button>
             <button class="btn soft sm" data-action="merge-selected-walls">${I('merge')} Merge walls</button>
           </div>
-          <button class="btn soft sm" style="width:100%;margin-top:6px;" data-action="duplicate-selection">${I('copy')} Duplicate selected walls</button>
-          <div class="sel-help" style="margin-top:8px;">Connect walls joins endpoints into a draggable junction node. Merge walls combines collinear in-line walls or parallel double walls into a single continuous wall.</div>
-          <button class="danger-link" data-action="delete-selection" style="margin-top:8px;">${I('trash')} Delete selected walls</button>
+          <div class="btn-row two" style="margin-top:6px;">
+            <button class="btn soft sm" data-action="copy-selection" title="Copy selected parts (Ctrl+C) to paste here or in another floorplan">${I('copy')} Copy parts</button>
+            <button class="btn soft sm" data-action="duplicate-selection" title="Duplicate in this plan (Ctrl+D)">${I('plus')} Duplicate</button>
+          </div>
+          ${hasClip ? `<button class="btn soft sm" style="width:100%;margin-top:6px;" data-action="paste-selection">${I('layers')} Paste copied parts</button>` : ''}
+          <div class="sel-help" style="margin-top:8px;">Drag any selected wall to move the group together. Copy (<kbd>Ctrl+C</kbd>) and switch projects to paste (<kbd>Ctrl+V</kbd>) into another floorplan.</div>
+          <button class="danger-link" data-action="delete-selection" style="margin-top:8px;">${I('trash')} Delete selected parts</button>
         </div>`;
       }
       if (sel.type === 'junction') {
@@ -526,6 +554,8 @@
         if (!seg) return '';
         const angle = Math.round(((seg.angle * 180) / Math.PI + 360) % 360);
         const parallelCandidate = !seg.boundary && seg.id && FC.findParallelWall ? FC.findParallelWall(plan, seg.id) : null;
+        const clip = this.app.getClipboard ? this.app.getClipboard() : null;
+        const canPasteOp = clip && clip.type === 'opening';
         return `<div class="sel-card">
           <div class="sel-head">
             <div><span class="eyebrow">Selected</span><div class="sel-title">${seg.boundary ? 'Exterior wall' : 'Interior wall'}</div></div>
@@ -546,7 +576,7 @@
             </div>
           </div>` : ''}
           ${!seg.boundary ? `<div class="field" style="margin-top:10px;">
-            <label class="num-field"><span>Resize length</span><span class="num-wrap"><input type="number" data-wall-len="${seg.id}" min="0.5" max="30" step="0.05" value="${FC.fmt(seg.len, 2)}"><em>m</em></span></label>
+            <label class="num-field"><span>Resize length</span><span class="num-wrap"><input type="text" inputmode="text" data-wall-len="${seg.id}" data-min="0.5" data-max="30" data-step="0.05" value="${fmtInput(seg.len)}"><em>${inUnit()}</em></span></label>
           </div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:6px;">
             <span style="font-size:11px;color:var(--ink-3);">Fixed anchor</span>
@@ -565,16 +595,21 @@
             <button class="btn soft sm" data-action="wall-add-door" data-wall="${seg.key}">${I('door')} Add door</button>
             <button class="btn soft sm" data-action="wall-add-window" data-wall="${seg.key}">${I('window')} Add window</button>
           </div>
+          ${canPasteOp ? `<button class="btn primary sm" style="width:100%;margin-top:6px;" data-action="paste-selection" data-wall="${seg.key}">${I('copy')} Paste copied ${FC.openingLabel(clip.opening).toLowerCase()} on this wall</button>` : ''}
           ${seg.boundary
-            ? `<button class="btn primary sm" style="margin-top:8px;width:100%" data-action="insert-outline-corner" data-seg-index="${seg.index}">${I('plus')} Insert corner on this wall</button>`
+            ? `<div class="btn-row two" style="margin-top:8px;">
+                <button class="btn primary sm" data-action="insert-outline-corner" data-seg-index="${seg.index}">${I('plus')} Insert corner</button>
+                <button class="btn soft sm" data-action="copy-selection" title="Copy wall & openings (Ctrl+C)">${I('copy')} Copy wall</button>
+              </div>`
             : `<div class="btn-row two" style="margin-top:6px;">
                 <button class="btn soft sm" data-action="wall-connect-mode" data-wall="${seg.id}" title="Click another wall to connect with this one">${I('link')} Connect wall...</button>
                 <button class="btn soft sm" data-action="wall-connect-nearest" data-wall="${seg.id}" title="Snap and join with the closest wall or corner">${I('sparkles')} Connect nearest</button>
               </div>
               <button class="btn soft sm" style="margin-top:6px;width:100%" data-action="toggle-wall-virtual" data-wall="${seg.id}">${seg.wall && seg.wall.virtual ? `${I('wall')} Convert to solid wall` : `${I('divider')} Convert to room divider (virtual)`}</button>
-              <div class="btn-row two" style="margin-top:6px;">
-                <button class="btn soft sm" data-action="wall-split" data-wall="${seg.id}">${I('sliders')} Split wall</button>
-                <button class="btn soft sm" data-action="duplicate-selection">${I('copy')} Duplicate</button>
+              <div class="btn-row" style="margin-top:6px; display:flex; gap:6px;">
+                <button class="btn soft sm" style="flex:1" data-action="wall-split" data-wall="${seg.id}">${I('sliders')} Split</button>
+                <button class="btn soft sm" style="flex:1" data-action="copy-selection" title="Copy wall & openings (Ctrl+C)">${I('copy')} Copy</button>
+                <button class="btn soft sm" style="flex:1" data-action="duplicate-selection" title="Duplicate wall (Ctrl+D)">${I('plus')} Duplicate</button>
               </div>`}
           <div class="sel-help" style="margin-top:8px;">${seg.boundary ? 'Drag this exterior wall to push/pull it orthogonally, or double-click on it to insert a new corner.' : 'Drag orange handles on wall tips to extend length (doors stay fixed). Drag wall body to slide with magnetic snap.'}</div>
           ${!seg.boundary ? `<button class="danger-link" data-action="delete-selection">${I('trash')} Delete wall</button>` : ''}
@@ -606,7 +641,7 @@
         const distB = seg ? Math.max(0, seg.len - (op.offset + op.width / 2)) : 0;
         return `<div class="sel-card">
           <div class="sel-head">
-            <div><span class="eyebrow">Selected</span><div class="sel-title">${label} (${fmtLen(op.width)})</div></div>
+            <div><span class="eyebrow">Selected</span><div class="sel-title" data-op-title>${label} (${fmtLen(op.width)})</div></div>
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="num-grid">
@@ -615,11 +650,11 @@
             ${op.kind === 'window' ? this.numField('Sill', 'opSill', 'sill', op.sill, 0, 2.2, 0.05) : ''}
           </div>
           ${seg ? `<div class="num-grid" style="margin-top:6px;">
-            <label class="num-field"><span>From Corner A (${fmtLenShort(distA, 2)})</span><span class="num-wrap">
-              <input type="number" data-op-field="offsetFromA" min="0.03" max="${Math.max(0.1, seg.len - op.width - 0.03).toFixed(2)}" step="0.05" value="${FC.fmt(distA, 2)}"><em>m</em>
+            <label class="num-field"><span data-op-dist-a-label>From Corner A (${fmtLenShort(distA, 2)})</span><span class="num-wrap">
+              <input type="text" inputmode="text" data-op-field="offsetFromA" data-min="0.03" data-max="${Math.max(0.1, seg.len - op.width - 0.03).toFixed(2)}" data-step="0.05" value="${fmtInput(distA)}"><em>${inUnit()}</em>
             </span></label>
-            <label class="num-field"><span>From Corner B (${fmtLenShort(distB, 2)})</span><span class="num-wrap">
-              <input type="number" data-op-field="offsetFromB" min="0.03" max="${Math.max(0.1, seg.len - op.width - 0.03).toFixed(2)}" step="0.05" value="${FC.fmt(distB, 2)}"><em>m</em>
+            <label class="num-field"><span data-op-dist-b-label>From Corner B (${fmtLenShort(distB, 2)})</span><span class="num-wrap">
+              <input type="text" inputmode="text" data-op-field="offsetFromB" data-min="0.03" data-max="${Math.max(0.1, seg.len - op.width - 0.03).toFixed(2)}" data-step="0.05" value="${fmtInput(distB)}"><em>${inUnit()}</em>
             </span></label>
           </div>` : ''}
           ${op.kind === 'door'
@@ -631,8 +666,11 @@
                 <button class="btn soft sm" style="flex:1" data-action="flip-door-hinge" data-opening="${op.id}">${I('rotate')} Hinge (${op.hinge === 'right' ? 'R' : 'L'})</button>
               </div>`
             : ''}
-          <button class="btn soft sm" style="width:100%;margin-top:8px;" data-action="duplicate-selection">${I('copy')} Duplicate ${label.toLowerCase()}</button>
-          <div class="sel-help" style="margin-top:8px;">${op.kind === 'window' ? `Sill <b data-op-sill>${fmtLen(op.sill)}</b> · head <b data-op-head>${fmtLen(op.sill + op.height)}</b> — both stay below the <b data-op-wall>${fmtLen(this.app.plan.settings.wallHeight)}</b> wall.` : 'Drag the opening along the wall to reposition it; live corner offsets are shown on canvas.'}</div>
+          <div class="btn-row two" style="margin-top:8px;">
+            <button class="btn soft sm" data-action="copy-selection" title="Copy ${label.toLowerCase()} (Ctrl+C) to paste on any wall">${I('copy')} Copy ${label.toLowerCase()}</button>
+            <button class="btn soft sm" data-action="duplicate-selection" title="Duplicate ${label.toLowerCase()} (Ctrl+D)">${I('plus')} Duplicate</button>
+          </div>
+          <div class="sel-help" style="margin-top:8px;">${op.kind === 'window' ? `Sill <b data-op-sill>${fmtLen(op.sill)}</b> · head <b data-op-head>${fmtLen(op.sill + op.height)}</b> — both stay below the <b data-op-wall>${fmtLen(this.app.plan.settings.wallHeight)}</b> wall.` : 'Drag the opening along any wall to reposition it, or press <kbd>Ctrl+C</kbd> then <kbd>Ctrl+V</kbd> over another wall.'}</div>
           <button class="danger-link" data-action="delete-selection">${I('trash')} Delete ${label.toLowerCase()}</button>
         </div>`;
       }
@@ -653,9 +691,10 @@
             <div class="field-head"><span>Rotation angle</span><span class="value" data-furniture-rot-value>${rotDeg}°</span></div>
             <input type="range" data-furniture-rot="${f.id}" min="0" max="360" step="5" value="${rotDeg}">
           </div>
-          <div class="btn-row two" style="margin-top:10px;">
-            <button class="btn soft sm" data-action="rotate-furniture" data-furniture="${f.id}">${I('rotate3d')} Rotate 90°</button>
-            <button class="btn soft sm" data-action="duplicate-selection">${I('copy')} Duplicate</button>
+          <div class="btn-row" style="margin-top:10px;display:flex;gap:6px;">
+            <button class="btn soft sm" style="flex:1" data-action="rotate-furniture" data-furniture="${f.id}">${I('rotate3d')} Rotate 90°</button>
+            <button class="btn soft sm" style="flex:1" data-action="copy-selection">${I('copy')} Copy</button>
+            <button class="btn soft sm" style="flex:1" data-action="duplicate-selection">${I('plus')} Duplicate</button>
           </div>
           <button class="btn soft sm danger" style="width:100%;margin-top:6px;" data-action="delete-selection">${I('trash')} Delete</button>
           <div class="sel-help" style="margin-top:8px;">Drag in 2D or 3D to move (snaps flush against nearby walls; hold <kbd>Alt</kbd> for free placement). Drag the rotation handle or press <kbd>R</kbd> to rotate.</div>
@@ -678,9 +717,10 @@
             <div><b>${fmtLenShort(l.x, 2)}, ${fmtLenShort(l.y, 2)}</b><span>pos · ${lenUnit}</span></div>
             <div><b>${fmtLen(l.z || 2.4)}</b><span>height</span></div>
           </div>
-          <div class="btn-row two" style="margin-top:10px;">
-            <button class="btn soft sm" data-action="duplicate-selection">${I('copy')} Duplicate</button>
-            <button class="btn soft sm danger" data-action="delete-selection">${I('trash')} Delete</button>
+          <div class="btn-row" style="margin-top:10px;display:flex;gap:6px;">
+            <button class="btn soft sm" style="flex:1" data-action="copy-selection">${I('copy')} Copy</button>
+            <button class="btn soft sm" style="flex:1" data-action="duplicate-selection">${I('plus')} Duplicate</button>
+            <button class="btn soft sm danger" style="flex:1" data-action="delete-selection">${I('trash')} Delete</button>
           </div>
           <div class="sel-help" style="margin-top:8px;">Drag to position this light fixture. It casts real dynamic light in 3D dollhouse mode.</div>
         </div>`;
@@ -710,6 +750,10 @@
           <div class="btn-row two" style="margin-top:10px;">
             <button class="btn soft sm" data-action="tool" data-tool="divider" title="Draw an invisible room divider to partition this space">${I('divider')} Split with divider</button>
             <button class="btn soft sm" data-action="furnish-room" data-room="${room.id}" title="Re-furnish this room">${I('magic')} Re-furnish</button>
+          </div>
+          <div class="btn-row two" style="margin-top:6px;">
+            <button class="btn soft sm" data-action="copy-selection" title="Copy room walls, doors, windows & furniture (Ctrl+C) to paste in any floorplan">${I('copy')} Copy room</button>
+            <button class="btn soft sm" data-action="duplicate-selection" title="Duplicate room (Ctrl+D)">${I('plus')} Duplicate room</button>
           </div>
           <button class="btn soft sm" style="width:100%;margin-top:8px;" data-action="open-furniture-catalog" data-room="${room.id}">${I('plus')} Browse & Add Furniture</button>
           <button class="danger-link" data-action="delete-room" data-room="${room.id}">${I('trash')} Remove this room</button>
@@ -883,6 +927,9 @@
       const plan = this.app.plan;
       const doors = plan.openings.filter((o) => o.kind === 'door').length;
       const windows = plan.openings.filter((o) => o.kind === 'window').length;
+      const fmtLen = (v) => (FC.formatLength ? FC.formatLength(v, plan) : v.toFixed(2) + ' m');
+      const clip = this.app.getClipboard ? this.app.getClipboard() : null;
+      const copiedOp = clip && clip.type === 'opening' ? clip.opening : null;
       return `<section class="panel-block">
         ${this.moduleHead('Openings', doors + ' doors · ' + windows + ' windows')}
         <div class="tool-chips">
@@ -893,10 +940,11 @@
         <p class="helper tight">${tool === 'window' ? 'Click a wall to place a window. Sill and head heights are configurable below.' : tool === 'opening' ? 'Click a wall to cut an open archway between two spaces.' : 'Click a wall to place a door. Drag it along the wall to slide it.'}</p>
         ${tool === 'window'
           ? `<div class="num-grid">${this.numField('Width', null, 'windowWidth', plan.settings.windowWidth, 0.6, 4, 0.05)}${this.numField('Sill', null, 'windowSill', plan.settings.windowSill, 0, 2.2, 0.05)}${this.numField('Height', null, 'windowHeight', plan.settings.windowHeight, 0.3, 2.6, 0.05)}</div>
-             <div class="hint-note small">${I('info')} Sill <b data-window-sill>${plan.settings.windowSill.toFixed(2)}</b> m → head <b data-window-head>${(plan.settings.windowSill + plan.settings.windowHeight).toFixed(2)}</b> m.</div>`
+             <div class="hint-note small">${I('info')} Sill <b data-window-sill>${fmtLen(plan.settings.windowSill)}</b> → head <b data-window-head>${fmtLen(plan.settings.windowSill + plan.settings.windowHeight)}</b>.</div>`
           : tool === 'opening'
             ? ''
             : `<div class="num-grid">${this.numField('Width', null, 'doorWidth', plan.settings.doorWidth, 0.6, 2.4, 0.05)}${this.numField('Height', null, 'doorHeight', plan.settings.doorHeight, 1.8, 3, 0.05)}</div>`}
+        ${copiedOp ? `<button class="btn soft sm" style="width:100%;margin-top:8px;" data-action="paste-selection" title="Paste copied ${FC.openingLabel(copiedOp).toLowerCase()} (Ctrl+V)">${I('copy')} Paste copied ${FC.openingLabel(copiedOp).toLowerCase()} (${fmtLen(copiedOp.width)})</button>` : ''}
       </section>`;
     }
 
@@ -1042,32 +1090,40 @@
         <details class="structure" ${this.structureOpen ? 'open' : ''}>
           <summary><span>${I('sliders')} Structure & openings</span>${I('chevron-down', 'chev')}</summary>
           <div class="adv-grid">
-            ${this.structField('Exterior wall', 'extThickness', s.extThickness, 0.08, 0.5, 0.01, 'm')}
-            ${this.structField('Interior wall', 'intThickness', s.intThickness, 0.08, 0.4, 0.01, 'm')}
-            ${this.structField('Floor slab', 'slabThickness', s.slabThickness, 0.08, 0.5, 0.01, 'm')}
-            ${this.structField('Door height', 'doorHeight', s.doorHeight, 1.8, 3, 0.05, 'm')}
-            ${this.structField('Door width', 'doorWidth', s.doorWidth, 0.6, 2.4, 0.05, 'm')}
-            ${this.structField('Window sill', 'windowSill', s.windowSill, 0, 2.2, 0.05, 'm')}
-            ${this.structField('Window height', 'windowHeight', s.windowHeight, 0.3, 2.6, 0.05, 'm')}
-            ${this.structField('Window width', 'windowWidth', s.windowWidth, 0.6, 4, 0.05, 'm')}
+            ${this.structField('Exterior wall', 'extThickness', s.extThickness, 0.08, 0.5, 0.01, true)}
+            ${this.structField('Interior wall', 'intThickness', s.intThickness, 0.08, 0.4, 0.01, true)}
+            ${this.structField('Floor slab', 'slabThickness', s.slabThickness, 0.08, 0.5, 0.01, true)}
+            ${this.structField('Door height', 'doorHeight', s.doorHeight, 1.8, 3, 0.05, false)}
+            ${this.structField('Door width', 'doorWidth', s.doorWidth, 0.6, 2.4, 0.05, false)}
+            ${this.structField('Window sill', 'windowSill', s.windowSill, 0, 2.2, 0.05, false)}
+            ${this.structField('Window height', 'windowHeight', s.windowHeight, 0.3, 2.6, 0.05, false)}
+            ${this.structField('Window width', 'windowWidth', s.windowWidth, 0.6, 4, 0.05, false)}
           </div>
           <div class="hint-note small">${I('info')} Openings are clamped to stay below the wall height.</div>
         </details>
       </section>`;
     }
 
-    structField(label, key, value, min, max, step, unit) {
-      return `<label class="num-field"><span>${label}</span><span class="num-wrap"><input type="number" data-setting="${key}" min="${min}" max="${max}" step="${step}" value="${FC.fmt(value, 2)}"><em>${unit}</em></span></label>`;
+    structField(label, key, value, min, max, step, isThickness) {
+      const plan = this.app.plan;
+      const opts = isThickness ? { thickness: true } : undefined;
+      const valStr = FC.formatInputLength ? FC.formatInputLength(value, plan, opts) : FC.fmt(value, 2);
+      const unitStr = FC.inputUnitLabel ? FC.inputUnitLabel(plan, opts) : 'm';
+      const unitAttr = isThickness ? 'data-unit-type="thickness"' : '';
+      return `<label class="num-field"><span>${label}</span><span class="num-wrap"><input type="text" inputmode="text" data-setting="${key}" ${unitAttr} data-min="${min}" data-max="${max}" data-step="${step}" value="${valStr}"><em>${unitStr}</em></span></label>`;
     }
 
     numField(label, suffix, key, value, min, max, step) {
+      const plan = this.app.plan;
       const settingKey = suffix ? null : key;
       const opField = suffix ? String(suffix).replace(/^op/i, '').toLowerCase() || key : null;
       const attrs = opField
         ? `data-op-field="${opField}"`
         : `data-setting="${settingKey}"`;
+      const valStr = FC.formatInputLength ? FC.formatInputLength(value, plan) : FC.fmt(value, 2);
+      const unitStr = FC.inputUnitLabel ? FC.inputUnitLabel(plan) : 'm';
       return `<label class="num-field"><span>${label}</span><span class="num-wrap">
-        <input type="number" ${attrs} min="${min}" max="${max}" step="${step}" value="${FC.fmt(value, 2)}"><em>m</em>
+        <input type="text" inputmode="text" ${attrs} data-min="${min}" data-max="${max}" data-step="${step}" value="${valStr}"><em>${unitStr}</em>
       </span></label>`;
     }
 
@@ -1082,16 +1138,36 @@
     }
 
     syncWindowReadouts() {
-      const s = this.app.plan.settings;
-      document.querySelectorAll('[data-window-sill]').forEach((n) => (n.textContent = s.windowSill.toFixed(2)));
-      document.querySelectorAll('[data-window-head]').forEach((n) => (n.textContent = (s.windowSill + s.windowHeight).toFixed(2)));
-      document.querySelectorAll('[data-op-wall]').forEach((n) => (n.textContent = s.wallHeight.toFixed(2)));
+      const plan = this.app.plan;
+      const s = plan.settings;
+      const fmtLen = (v) => (FC.formatLength ? FC.formatLength(v, plan) : v.toFixed(2) + ' m');
+      const fmtLenShort = (v, d = 2) => (FC.formatLengthShort ? FC.formatLengthShort(v, plan, d) : FC.fmt(v, d));
+      const fmtInput = (v, opts) => (FC.formatInputLength ? FC.formatInputLength(v, plan, opts) : FC.fmt(v, 2));
+      document.querySelectorAll('[data-window-sill]').forEach((n) => (n.textContent = fmtLen(s.windowSill)));
+      document.querySelectorAll('[data-window-head]').forEach((n) => (n.textContent = fmtLen(s.windowSill + s.windowHeight)));
+      document.querySelectorAll('[data-op-wall]').forEach((n) => (n.textContent = fmtLen(s.wallHeight)));
       const sel = this.app.ui.selection;
       if (sel && sel.type === 'opening') {
-        const op = this.app.plan.openings.find((o) => o.id === sel.id);
-        if (op && op.kind === 'window') {
-          document.querySelectorAll('[data-op-sill]').forEach((n) => (n.textContent = op.sill.toFixed(2)));
-          document.querySelectorAll('[data-op-head]').forEach((n) => (n.textContent = (op.sill + op.height).toFixed(2)));
+        const op = plan.openings.find((o) => o.id === sel.id);
+        if (op) {
+          const label = FC.openingLabel(op);
+          document.querySelectorAll('[data-op-title]').forEach((n) => (n.textContent = `${label} (${fmtLen(op.width)})`));
+          if (op.kind === 'window') {
+            document.querySelectorAll('[data-op-sill]').forEach((n) => (n.textContent = fmtLen(op.sill)));
+            document.querySelectorAll('[data-op-head]').forEach((n) => (n.textContent = fmtLen(op.sill + op.height)));
+          }
+          const seg = FC.segmentByKey(plan, op.hostKey);
+          if (seg) {
+            const distA = Math.max(0, op.offset - op.width / 2);
+            const distB = Math.max(0, seg.len - (op.offset + op.width / 2));
+            document.querySelectorAll('[data-op-dist-a-label]').forEach((n) => (n.textContent = `From Corner A (${fmtLenShort(distA, 2)})`));
+            document.querySelectorAll('[data-op-dist-b-label]').forEach((n) => (n.textContent = `From Corner B (${fmtLenShort(distB, 2)})`));
+            const active = document.activeElement;
+            const inA = document.querySelector('input[data-op-field="offsetFromA"]');
+            if (inA && inA !== active) inA.value = fmtInput(distA);
+            const inB = document.querySelector('input[data-op-field="offsetFromB"]');
+            if (inB && inB !== active) inB.value = fmtInput(distB);
+          }
         }
       }
     }
@@ -1106,6 +1182,7 @@
       if (el.dataset.density !== undefined) return 'density';
       if (el.dataset.furnitureRot) return 'furnRot:' + el.dataset.furnitureRot;
       if (el.dataset.opField) return 'op:' + el.dataset.opField;
+      if (el.dataset.wallLen) return 'wallLen:' + el.dataset.wallLen;
       return 'value';
     }
 
@@ -1117,12 +1194,90 @@
       }
     }
 
+    parseElementLength(el) {
+      const isThick = el.dataset && el.dataset.unitType === 'thickness';
+      if (FC.parseLengthInput) {
+        return FC.parseLengthInput(el.value, this.app.plan, isThick ? { unit: 'in' } : undefined);
+      }
+      return parseFloat(el.value);
+    }
+
+    getModelValueForInput(el) {
+      const plan = this.app.plan;
+      if (!plan || !el || !el.dataset) return NaN;
+      if (el.dataset.setting) {
+        return plan.settings[el.dataset.setting];
+      }
+      if (el.dataset.opField && this.app.ui.selection && this.app.ui.selection.type === 'opening') {
+        const op = plan.openings.find((o) => o.id === this.app.ui.selection.id);
+        if (!op) return NaN;
+        const f = el.dataset.opField;
+        if (f === 'width' || f === 'height' || f === 'sill') return op[f];
+        const seg = FC.segmentByKey(plan, op.hostKey);
+        if (!seg) return NaN;
+        if (f === 'offsetFromA') return Math.max(0, op.offset - op.width / 2);
+        if (f === 'offsetFromB') return Math.max(0, seg.len - (op.offset + op.width / 2));
+      }
+      if (el.dataset.wallLen) {
+        const seg = FC.segmentByKey(plan, 'w:' + el.dataset.wallLen);
+        if (seg) return seg.len;
+      }
+      return NaN;
+    }
+
+    formatDimensionInput(el) {
+      if (!el || !el.dataset) return;
+      if (el.type === 'range') return;
+      if (!el.dataset.setting && !el.dataset.opField && !el.dataset.wallLen) return;
+      const val = this.getModelValueForInput(el);
+      if (isFinite(val)) {
+        const isThick = el.dataset.unitType === 'thickness';
+        el.value = FC.formatInputLength
+          ? FC.formatInputLength(val, this.app.plan, isThick ? { thickness: true } : undefined)
+          : FC.fmt(val, 2);
+      }
+    }
+
+    stepDimensionInput(el, dir, shiftKey) {
+      this.ensureHistory(el);
+      const plan = this.app.plan;
+      const isImp = FC.isImperial && FC.isImperial(plan);
+      const isThick = el.dataset && el.dataset.unitType === 'thickness';
+      let curVal = this.parseElementLength(el);
+      if (!isFinite(curVal)) curVal = this.getModelValueForInput(el);
+      if (!isFinite(curVal)) return;
+
+      let step;
+      if (isImp) {
+        if (isThick) step = (shiftKey ? 1 : 0.25) * FC.INCHES_TO_METERS;
+        else step = (shiftKey ? 6 : 1) * FC.INCHES_TO_METERS;
+      } else {
+        const baseStep = parseFloat(el.dataset.step || el.step) || 0.05;
+        step = shiftKey ? baseStep * 5 : baseStep;
+      }
+
+      const min = parseFloat(el.dataset.min || el.min || '0');
+      const max = parseFloat(el.dataset.max || el.max || '100');
+      const nextVal = FC.clamp(curVal + dir * step, isFinite(min) ? min : 0, isFinite(max) ? max : 100);
+
+      if (el.dataset.setting) {
+        this.app.updateSetting(el.dataset.setting, nextVal);
+      } else if (el.dataset.opField) {
+        this.app.updateSelectedOpening(el.dataset.opField, nextVal);
+      } else if (el.dataset.wallLen) {
+        const fromEnd = this.app.wallAnchorEnd !== undefined ? this.app.wallAnchorEnd : 0;
+        this.app.resizeWall(el.dataset.wallLen, nextVal, fromEnd);
+      }
+      this.formatDimensionInput(el);
+      this.syncWindowReadouts();
+    }
+
     onInput(e) {
       const el = e.target;
       if (el.dataset && el.dataset.setting) {
         this.ensureHistory(el);
         const key = el.dataset.setting;
-        const value = parseFloat(el.value);
+        const value = el.type === 'range' ? parseFloat(el.value) : this.parseElementLength(el);
         if (!isFinite(value)) return;
         this.app.updateSetting(key, value);
         const label = document.querySelectorAll('[data-setting-value="' + key + '"]');
@@ -1156,7 +1311,7 @@
       }
       if (el.dataset && el.dataset.opField) {
         this.ensureHistory(el);
-        const value = parseFloat(el.value);
+        const value = this.parseElementLength(el);
         if (!isFinite(value)) return;
         this.app.updateSelectedOpening(el.dataset.opField, value);
         this.syncWindowReadouts();
@@ -1164,7 +1319,7 @@
       }
       if (el.dataset && el.dataset.wallLen) {
         this.ensureHistory(el);
-        const value = parseFloat(el.value);
+        const value = this.parseElementLength(el);
         if (isFinite(value) && value > 0.1) {
           const fromEnd = this.app.wallAnchorEnd !== undefined ? this.app.wallAnchorEnd : 0;
           this.app.resizeWall(el.dataset.wallLen, value, fromEnd);
@@ -1202,6 +1357,9 @@
         return;
       }
       if (!e.target.matches || !e.target.matches('input')) return;
+      this.formatDimensionInput(e.target);
+      this.syncWindowReadouts();
+      if (this.app) this.app._origOpeningOffset = null;
       this._activeSetting = null;
       this.app.saveSoon();
     }
@@ -1232,6 +1390,12 @@
           break;
         case 'delete-outline-corner':
           app.deleteOutlineCorner(parseInt(el.dataset.index, 10));
+          break;
+        case 'copy-selection':
+          app.copySelection();
+          break;
+        case 'paste-selection':
+          app.pasteClipboard(null, el.dataset.wall || null);
           break;
         case 'duplicate-selection':
           app.duplicateSelection();
@@ -1556,9 +1720,13 @@
 
     openMoreMenu(anchor) {
       const app = this.app;
+      const hasClip = !!(app.hasClipboard && app.hasClipboard());
       this.openMenu(
         anchor,
         [
+          { label: 'Copy selection', icon: 'copy', shortcut: 'Ctrl C', disabled: !app.ui.selection, action: () => app.copySelection() },
+          { label: 'Paste copied parts', icon: 'layers', shortcut: 'Ctrl V', disabled: !hasClip, action: () => app.pasteClipboard() },
+          { separator: true },
           { label: 'Fit plan to screen', icon: 'expand', shortcut: 'F', action: () => app.fit(1) },
           { label: 'Toggle dimensions', icon: 'ruler', action: () => app.toggleDimensions() },
           { label: `Units: ${FC.isImperial && FC.isImperial(app.plan) ? 'Switch to Meters (m)' : 'Switch to Feet & Inches (ft/in)'}`, icon: 'measure', shortcut: 'U', action: () => app.toggleUnits() },
@@ -1599,6 +1767,7 @@
           <span><kbd>D</kbd> Door</span><span><kbd>N</kbd> Window</span>
           <span><kbd>R</kbd> Rooms</span><span><kbd>U</kbd> Units (m / ft'in")</span>
           <span><kbd>3</kbd> Toggle 3D</span><span><kbd>F</kbd> Fit</span>
+          <span><kbd>Ctrl C</kbd> Copy parts / opening</span><span><kbd>Ctrl V</kbd> Paste parts / opening</span>
           <span><kbd>Ctrl D</kbd> Duplicate</span><span><kbd>Del</kbd> Delete selection</span>
           <span><kbd>Ctrl Z</kbd> Undo</span><span><kbd>Shift Ctrl Z</kbd> Redo</span>
           <span><kbd>Shift</kbd> Ortho / Box select</span><span><kbd>Alt</kbd> Free move (no snap)</span>

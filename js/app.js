@@ -5,6 +5,7 @@
 
   const STORAGE_KEY = 'roomcraft.projects.v1';
   const CURRENT_KEY = 'roomcraft.current.v1';
+  const CLIPBOARD_KEY = 'roomcraft.clipboard.v1';
   const LEGACY_STORAGE_KEY = 'floorcraft.projects.v1';
   const LEGACY_CURRENT_KEY = 'floorcraft.current.v1';
   const MAX_HISTORY = 70;
@@ -887,9 +888,503 @@
       }
     }
 
+    getClipboard() {
+      if (this._clipboard) return this._clipboard;
+      try {
+        const raw = localStorage.getItem(CLIPBOARD_KEY);
+        if (raw) {
+          this._clipboard = JSON.parse(raw);
+          return this._clipboard;
+        }
+      } catch (e) {}
+      return null;
+    }
+
+    setClipboard(clip) {
+      this._clipboard = clip;
+      try {
+        if (clip) localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(clip));
+        else localStorage.removeItem(CLIPBOARD_KEY);
+      } catch (e) {}
+    }
+
+    hasClipboard() {
+      return !!this.getClipboard();
+    }
+
+    copySelection(silent) {
+      const sel = this.ui.selection;
+      if (!sel || !this.plan) {
+        if (!silent) this.toast('Select a door, window, wall, room, or furniture first', 'info');
+        return false;
+      }
+
+      if (sel.type === 'opening' && this.plan.openings) {
+        const op = this.plan.openings.find((o) => o.id === sel.id);
+        if (!op) return false;
+        const pl = FC.openingPlacement(this.plan, op);
+        this.setClipboard({
+          type: 'opening',
+          sourcePlanId: this.plan.id,
+          opening: clone(op),
+          worldPos: pl ? { x: pl.x, y: pl.y } : null,
+          pasteCount: 0,
+        });
+        if (!silent) {
+          const label = FC.openingLabel(op);
+          this.toast(`Copied ${label} — hover any wall and press Ctrl+V (or right-click a wall) to paste`, 'success');
+          if (this.ui && this.ui.renderSidebar) this.ui.renderSidebar();
+        }
+        return true;
+      }
+
+      const walls = [];
+      const openings = [];
+      const furniture = [];
+      const lights = [];
+      const rooms = [];
+      const allSegs = FC.getSegments(this.plan);
+      let label = 'selection';
+
+      if (sel.type === 'wall' && sel.key) {
+        const seg = allSegs.find((s) => s.key === sel.key);
+        if (!seg) return false;
+        walls.push({
+          a: { x: seg.a.x, y: seg.a.y },
+          b: { x: seg.b.x, y: seg.b.y },
+          thickness: seg.thickness,
+          virtual: !!(seg.wall && seg.wall.virtual),
+          boundary: !!seg.boundary,
+        });
+        (this.plan.openings || []).forEach((op) => {
+          if (op.hostKey === seg.key) {
+            openings.push(Object.assign({}, clone(op), { wallIndex: 0 }));
+          }
+        });
+        label = (seg.boundary ? 'exterior wall' : 'wall') + (openings.length ? ` + ${openings.length} opening${openings.length === 1 ? '' : 's'}` : '');
+      } else if (sel.type === 'walls') {
+        const keyToIdx = new Map();
+        (sel.keys || []).forEach((k) => {
+          const seg = allSegs.find((s) => s.key === k);
+          if (!seg) return;
+          const idx = walls.length;
+          walls.push({
+            a: { x: seg.a.x, y: seg.a.y },
+            b: { x: seg.b.x, y: seg.b.y },
+            thickness: seg.thickness,
+            virtual: !!(seg.wall && seg.wall.virtual),
+            boundary: !!seg.boundary,
+          });
+          keyToIdx.set(seg.key, idx);
+        });
+        (this.plan.openings || []).forEach((op) => {
+          if (keyToIdx.has(op.hostKey)) {
+            openings.push(Object.assign({}, clone(op), { wallIndex: keyToIdx.get(op.hostKey) }));
+          }
+        });
+        if (Array.isArray(sel.furnitureIds) && this.furniture) {
+          sel.furnitureIds.forEach((fid) => {
+            const f = this.furniture.find((item) => item.id === fid);
+            if (f) furniture.push(clone(f));
+          });
+        }
+        if (Array.isArray(sel.lightIds) && this.plan.lights) {
+          sel.lightIds.forEach((lid) => {
+            const l = this.plan.lights.find((item) => item.id === lid);
+            if (l) lights.push(clone(l));
+          });
+        }
+        label = `${walls.length} wall${walls.length === 1 ? '' : 's'}` + (openings.length ? ` + ${openings.length} opening${openings.length === 1 ? '' : 's'}` : '');
+      } else if (sel.type === 'room') {
+        const room = (this.rooms || []).find((r) => r.id === sel.id);
+        if (!room || !room.polygon || room.polygon.length < 3) return false;
+        const poly = room.polygon;
+        const addedOpIds = new Set();
+        for (let i = 0; i < poly.length; i++) {
+          const pA = poly[i];
+          const pB = poly[(i + 1) % poly.length];
+          const edgeLen = FC.dist(pA, pB);
+          if (edgeLen < 0.1) continue;
+          const mid = { x: (pA.x + pB.x) / 2, y: (pA.y + pB.y) / 2 };
+          const matchedSeg = allSegs.find((s) => {
+            const h = FC.pointSegment(mid, s.a, s.b);
+            return h.dist < 0.08;
+          });
+          const wIdx = walls.length;
+          walls.push({
+            a: { x: pA.x, y: pA.y },
+            b: { x: pB.x, y: pB.y },
+            thickness: matchedSeg ? matchedSeg.thickness : this.plan.settings.intThickness,
+            virtual: !!(matchedSeg && matchedSeg.wall && matchedSeg.wall.virtual),
+          });
+          (this.plan.openings || []).forEach((op) => {
+            if (addedOpIds.has(op.id)) return;
+            const pl = FC.openingPlacement(this.plan, op, allSegs);
+            if (!pl) return;
+            const hit = FC.pointSegment({ x: pl.x, y: pl.y }, pA, pB);
+            if (hit.dist < 0.15 && hit.t >= 0.02 && hit.t <= 0.98) {
+              const off = FC.clamp(hit.t * edgeLen, op.width / 2 + 0.03, edgeLen - op.width / 2 - 0.03);
+              openings.push(Object.assign({}, clone(op), { wallIndex: wIdx, offset: FC.round(off, 3) }));
+              addedOpIds.add(op.id);
+            }
+          });
+        }
+        if (this.furniture && this.plan.furnished) {
+          this.furniture.forEach((f) => {
+            if (f.roomId === room.id || FC.pointInPolygon({ x: f.x, y: f.y }, poly)) {
+              furniture.push(clone(f));
+            }
+          });
+        }
+        if (this.plan.lights) {
+          this.plan.lights.forEach((l) => {
+            if (FC.pointInPolygon({ x: l.x, y: l.y }, poly)) {
+              lights.push(clone(l));
+            }
+          });
+        }
+        rooms.push({
+          name: room.name || '',
+          type: room.type || 'living',
+          polygon: clone(poly),
+          isManual: !!room.isManual,
+        });
+        label = `room "${room.name || room.type || 'Room'}"`;
+      } else if (sel.type === 'furniture' && this.furniture) {
+        const orig = this.furniture.find((f) => f.id === sel.id);
+        if (!orig) return false;
+        furniture.push(clone(orig));
+        label = orig.name || orig.kind || 'furniture';
+      } else if (sel.type === 'light' && this.plan.lights) {
+        const orig = this.plan.lights.find((l) => l.id === sel.id);
+        if (!orig) return false;
+        lights.push(clone(orig));
+        label = 'light fixture';
+      } else {
+        if (!silent) this.toast('Nothing copyable selected', 'info');
+        return false;
+      }
+
+      const pts = [];
+      walls.forEach((w) => {
+        pts.push(w.a, w.b);
+      });
+      furniture.forEach((f) => {
+        pts.push({ x: f.x - (f.w || 0.5) / 2, y: f.y - (f.d || 0.5) / 2 });
+        pts.push({ x: f.x + (f.w || 0.5) / 2, y: f.y + (f.d || 0.5) / 2 });
+      });
+      lights.forEach((l) => {
+        pts.push({ x: l.x, y: l.y });
+      });
+      const bounds = pts.length ? FC.polygonBounds(pts) : { x0: 0, y0: 0, x1: 1, y1: 1, w: 1, d: 1, cx: 0.5, cy: 0.5 };
+
+      this.setClipboard({
+        type: 'parts',
+        sourcePlanId: this.plan.id,
+        label,
+        walls,
+        openings,
+        furniture,
+        lights,
+        rooms,
+        bounds,
+        pasteCount: 0,
+      });
+
+      if (!silent) {
+        this.toast(`Copied ${label} — press Ctrl+V here or in another floorplan to paste`, 'success');
+        if (this.ui && this.ui.renderSidebar) this.ui.renderSidebar();
+      }
+      return true;
+    }
+
+    pasteClipboard(targetWorldPt, targetWallKey) {
+      const clip = this.getClipboard();
+      if (!clip || !this.plan) {
+        this.toast('Clipboard is empty — copy a door, window, wall, or room first (Ctrl+C)', 'info');
+        return false;
+      }
+
+      if (clip.type === 'opening' && clip.opening) {
+        const orig = clip.opening;
+        const label = FC.openingLabel(orig);
+        let chosenKey = null;
+        let prefOffset = null;
+        const ptr = targetWorldPt || (this.editor && this.editor.pointer && this.editor.pointer.inside ? { x: this.editor.pointer.wx, y: this.editor.pointer.wy } : null);
+
+        if (targetWallKey && FC.segmentByKey(this.plan, targetWallKey)) {
+          const seg = FC.segmentByKey(this.plan, targetWallKey);
+          chosenKey = seg.key;
+          prefOffset = targetWorldPt ? FC.pointSegment(targetWorldPt, seg.a, seg.b).t * seg.len : seg.len / 2;
+        } else if (ptr) {
+          const pointerUnmoved = clip.worldPos && clip.sourcePlanId === this.plan.id && FC.dist(ptr, clip.worldPos) < 0.25;
+          if (pointerUnmoved && this.ui.selection && this.ui.selection.type === 'wall' && this.ui.selection.key !== orig.hostKey) {
+            const selSeg = FC.segmentByKey(this.plan, this.ui.selection.key);
+            if (selSeg) {
+              chosenKey = selSeg.key;
+              prefOffset = selSeg.len / 2;
+            }
+          }
+          if (!chosenKey) {
+            const near = FC.nearestWall(this.plan, ptr, 3.0);
+            if (near) {
+              chosenKey = near.seg.key;
+              if (near.seg.key === orig.hostKey && clip.sourcePlanId === this.plan.id && Math.abs(near.offset - orig.offset) < orig.width * 0.6) {
+                prefOffset = orig.offset + (orig.width + 0.25) * ((clip.pasteCount || 0) + 1);
+              } else {
+                prefOffset = near.offset;
+              }
+            }
+          }
+        }
+
+        if (!chosenKey && this.ui.selection && this.ui.selection.type === 'wall') {
+          const selSeg = FC.segmentByKey(this.plan, this.ui.selection.key);
+          if (selSeg) {
+            chosenKey = selSeg.key;
+            prefOffset = selSeg.len / 2;
+          }
+        }
+
+        if (!chosenKey && clip.sourcePlanId === this.plan.id && orig.hostKey) {
+          const origSeg = FC.segmentByKey(this.plan, orig.hostKey);
+          if (origSeg) {
+            chosenKey = origSeg.key;
+            prefOffset = orig.offset + (orig.width + 0.25) * ((clip.pasteCount || 0) + 1);
+          }
+        }
+
+        let slot = chosenKey ? FC.findFreeOpeningOffset(this.plan, chosenKey, prefOffset, orig.width, null) : null;
+
+        // If target wall is full or no wall was chosen yet, find the closest wall with free space
+        if (!slot) {
+          const refPt = ptr || (this.editor && this.editor.view ? { x: this.editor.view.cx, y: this.editor.view.cy } : { x: 5, y: 4 });
+          const segs = FC.getSegments(this.plan).slice();
+          segs.sort((a, b) => FC.pointSegment(refPt, a.a, a.b).dist - FC.pointSegment(refPt, b.a, b.b).dist);
+          for (const seg of segs) {
+            const hit = FC.pointSegment(refPt, seg.a, seg.b);
+            const candidateSlot = FC.findFreeOpeningOffset(this.plan, seg.key, hit.t * seg.len, orig.width, null);
+            if (candidateSlot) {
+              chosenKey = seg.key;
+              slot = candidateSlot;
+              break;
+            }
+          }
+        }
+
+        if (!slot || !chosenKey) {
+          this.toast(`Not enough free wall space to paste the ${label.toLowerCase()}`, 'info');
+          return false;
+        }
+
+        this.pushHistory();
+        const copy = Object.assign({}, clone(orig), {
+          id: FC.uid('op'),
+          hostKey: chosenKey,
+          offset: slot.offset,
+          width: slot.width,
+        });
+        this.plan.openings.push(copy);
+        clip.pasteCount = (clip.pasteCount || 0) + 1;
+        this.setClipboard(clip);
+        this.select({ type: 'opening', id: copy.id });
+        this.changed({ rooms: false, furniture: false, save: true });
+        this.toast(`Pasted ${label}`, 'success');
+        return true;
+      }
+
+      if (clip.type === 'parts') {
+        const b = clip.bounds || { cx: 0, cy: 0, w: 0, d: 0 };
+        const isCrossPlan = clip.sourcePlanId !== this.plan.id;
+        const wasBlank = isBlankPlan(this.plan);
+        clip.pasteCount = (clip.pasteCount || 0) + 1;
+        this.setClipboard(clip);
+
+        let dx = 0;
+        let dy = 0;
+        if (targetWorldPt) {
+          dx = targetWorldPt.x - b.cx;
+          dy = targetWorldPt.y - b.cy;
+        } else if (isCrossPlan) {
+          if (wasBlank) {
+            dx = 0;
+            dy = 0;
+          } else if (this.editor && this.editor.pointer && this.editor.pointer.inside) {
+            dx = this.editor.pointer.wx - b.cx;
+            dy = this.editor.pointer.wy - b.cy;
+          } else if (this.editor && this.editor.view) {
+            const off = (clip.pasteCount - 1) * 0.5;
+            dx = this.editor.view.cx - b.cx + off;
+            dy = this.editor.view.cy - b.cy + off;
+          }
+        } else {
+          const ptr = this.editor && this.editor.pointer && this.editor.pointer.inside
+            ? { x: this.editor.pointer.wx, y: this.editor.pointer.wy }
+            : null;
+          if (ptr && Math.hypot(ptr.x - b.cx, ptr.y - b.cy) > Math.max(b.w || 1, b.d || 1) * 0.65 + 0.5) {
+            dx = ptr.x - b.cx;
+            dy = ptr.y - b.cy;
+          } else {
+            const off = 0.5 * clip.pasteCount;
+            dx = off;
+            dy = off;
+          }
+        }
+
+        if ((dx !== 0 || dy !== 0) && this.editor && this.plan.settings.snapGrid !== false) {
+          dx = this.editor.snapGridValue(dx);
+          dy = this.editor.snapGridValue(dy);
+        }
+
+        this.pushHistory();
+        this.plan.walls = this.plan.walls || [];
+        this.plan.openings = this.plan.openings || [];
+        this.plan.lights = this.plan.lights || [];
+        this.plan.rooms = this.plan.rooms || [];
+
+        const existingSegs = FC.getSegments(this.plan);
+        const wallIdxToKey = new Map();
+        const pastedWallIds = [];
+        const pastedWallKeys = [];
+
+        (clip.walls || []).forEach((wItem, idx) => {
+          const a = { x: FC.round(wItem.a.x + dx, 3), y: FC.round(wItem.a.y + dy, 3) };
+          const bPt = { x: FC.round(wItem.b.x + dx, 3), y: FC.round(wItem.b.y + dy, 3) };
+          const dupSeg = existingSegs.find(
+            (s) =>
+              (FC.dist(s.a, a) < 0.03 && FC.dist(s.b, bPt) < 0.03) ||
+              (FC.dist(s.a, bPt) < 0.03 && FC.dist(s.b, a) < 0.03),
+          );
+          if (dupSeg) {
+            wallIdxToKey.set(idx, dupSeg.key);
+            if (!pastedWallKeys.includes(dupSeg.key)) pastedWallKeys.push(dupSeg.key);
+            if (dupSeg.id && !pastedWallIds.includes(dupSeg.id)) pastedWallIds.push(dupSeg.id);
+          } else {
+            const nw = {
+              id: FC.uid('w'),
+              a,
+              b: bPt,
+            };
+            if (wItem.virtual) nw.virtual = true;
+            if (wItem.thickness) nw.thickness = wItem.thickness;
+            this.plan.walls.push(nw);
+            const k = 'w:' + nw.id;
+            wallIdxToKey.set(idx, k);
+            pastedWallIds.push(nw.id);
+            pastedWallKeys.push(k);
+          }
+        });
+
+        (clip.openings || []).forEach((opItem) => {
+          const hostKey = wallIdxToKey.get(opItem.wallIndex);
+          if (!hostKey) return;
+          const slot = FC.findFreeOpeningOffset(this.plan, hostKey, opItem.offset, opItem.width, null);
+          if (slot) {
+            const newOp = Object.assign({}, clone(opItem), {
+              id: FC.uid('op'),
+              hostKey,
+              offset: slot.offset,
+              width: slot.width,
+            });
+            delete newOp.wallIndex;
+            this.plan.openings.push(newOp);
+          }
+        });
+
+        (clip.rooms || []).forEach((rm) => {
+          if (!rm.polygon || rm.polygon.length < 3) return;
+          const poly = rm.polygon.map((p) => ({ x: FC.round(p.x + dx, 3), y: FC.round(p.y + dy, 3) }));
+          const centroid = FC.polygonCentroid(poly);
+          const area = Math.abs(FC.polygonArea(poly));
+          this.plan.rooms.push({
+            id: FC.uid('room'),
+            name: rm.name || '',
+            type: rm.type || 'living',
+            centroid,
+            area,
+          });
+          if (rm.isManual || this.plan.autoDetectRooms === false) {
+            this.plan.manualRooms = this.plan.manualRooms || [];
+            this.plan.manualRooms.push({
+              id: FC.uid('room_manual'),
+              name: rm.name || 'Custom Room',
+              type: rm.type || 'living',
+              polygon: poly,
+              area,
+              centroid,
+              bounds: FC.polygonBounds(poly),
+              isManual: true,
+            });
+          }
+        });
+
+        const pastedFurnIds = [];
+        if (Array.isArray(clip.furniture) && clip.furniture.length) {
+          this.furniture = this.furniture || [];
+          clip.furniture.forEach((fItem) => {
+            const nf = Object.assign({}, clone(fItem), {
+              id: FC.uid('furn'),
+              x: FC.round(fItem.x + dx, 3),
+              y: FC.round(fItem.y + dy, 3),
+              custom: true,
+            });
+            this.furniture.push(nf);
+            pastedFurnIds.push(nf.id);
+          });
+          this.plan.furnished = true;
+          this.plan.furniture = this.furniture;
+        }
+
+        const pastedLightIds = [];
+        if (Array.isArray(clip.lights) && clip.lights.length) {
+          clip.lights.forEach((lItem) => {
+            const nl = Object.assign({}, clone(lItem), {
+              id: FC.uid('light'),
+              x: FC.round(lItem.x + dx, 3),
+              y: FC.round(lItem.y + dy, 3),
+            });
+            this.plan.lights.push(nl);
+            pastedLightIds.push(nl.id);
+          });
+        }
+
+        if (pastedWallKeys.length > 1 || (pastedWallKeys.length >= 1 && (pastedFurnIds.length || pastedLightIds.length))) {
+          this.select({
+            type: 'walls',
+            keys: pastedWallKeys,
+            ids: pastedWallIds,
+            furnitureIds: pastedFurnIds,
+            lightIds: pastedLightIds,
+          });
+        } else if (pastedWallKeys.length === 1) {
+          this.select({ type: 'wall', key: pastedWallKeys[0] });
+        } else if (pastedFurnIds.length === 1) {
+          this.select({ type: 'furniture', id: pastedFurnIds[0] });
+        } else if (pastedLightIds.length === 1) {
+          this.select({ type: 'light', id: pastedLightIds[0] });
+        }
+
+        this.changed({ rooms: true, furniture: false, save: true });
+        if (wasBlank && this.editor) {
+          if (this.ui && this.ui.hideWelcome) this.ui.hideWelcome();
+          this.editor.fit();
+        }
+        this.toast(`Pasted ${clip.label || 'parts'}`, 'success');
+        return true;
+      }
+
+      return false;
+    }
+
     duplicateSelection() {
       const sel = this.ui.selection;
       if (!sel || !this.plan) return;
+      if (sel.type === 'room' || sel.type === 'walls') {
+        if (this.copySelection(true)) {
+          this.pasteClipboard();
+        }
+        return;
+      }
       if (sel.type === 'furniture' && this.furniture) {
         const orig = this.furniture.find((f) => f.id === sel.id);
         if (!orig) return;
@@ -927,8 +1422,8 @@
         if (!orig) return;
         const seg = FC.segmentByKey(this.plan, orig.hostKey);
         if (!seg) return;
-        const candidates = [orig.offset + orig.width + 0.25, orig.offset - orig.width - 0.25];
         let placedOffset = null;
+        const candidates = [orig.offset + orig.width + 0.25, orig.offset - orig.width - 0.25];
         for (const cand of candidates) {
           if (cand >= orig.width / 2 + 0.03 && cand <= seg.len - orig.width / 2 - 0.03) {
             if (FC.canPlaceOpening(this.plan, orig.hostKey, cand, orig.width, null)) {
@@ -937,8 +1432,13 @@
             }
           }
         }
+        if (placedOffset === null && FC.findFreeOpeningOffset) {
+          const slot = FC.findFreeOpeningOffset(this.plan, orig.hostKey, orig.offset + orig.width + 0.2, orig.width, null);
+          if (slot) placedOffset = slot.offset;
+        }
         if (placedOffset === null) {
-          this.toast('Not enough free space on this wall to duplicate the opening', 'info');
+          this.copySelection(true);
+          this.toast('Wall is full — copied opening! Hover or right-click any other wall and press Ctrl+V to paste.', 'info');
           return;
         }
         this.pushHistory();
@@ -954,51 +1454,29 @@
       }
       if (sel.type === 'wall' && sel.key) {
         const seg = FC.segmentByKey(this.plan, sel.key);
-        if (!seg || seg.boundary || !seg.id) {
-          this.toast('Only interior walls can be duplicated', 'info');
-          return;
-        }
-        const orig = this.plan.walls.find((w) => w.id === seg.id);
-        if (!orig) return;
+        if (!seg) return;
         this.pushHistory();
         const nx = -Math.sin(seg.angle) * 0.5;
         const ny = Math.cos(seg.angle) * 0.5;
         const copy = {
           id: FC.uid('w'),
-          a: { x: FC.round(orig.a.x + nx, 3), y: FC.round(orig.a.y + ny, 3) },
-          b: { x: FC.round(orig.b.x + nx, 3), y: FC.round(orig.b.y + ny, 3) },
+          a: { x: FC.round(seg.a.x + nx, 3), y: FC.round(seg.a.y + ny, 3) },
+          b: { x: FC.round(seg.b.x + nx, 3), y: FC.round(seg.b.y + ny, 3) },
         };
-        if (orig.virtual) copy.virtual = true;
-        if (orig.thickness) copy.thickness = orig.thickness;
+        if (seg.wall && seg.wall.virtual) copy.virtual = true;
+        if (seg.wall && seg.wall.thickness) copy.thickness = seg.wall.thickness;
         this.plan.walls.push(copy);
-        this.select({ type: 'wall', key: 'w:' + copy.id });
+        const newKey = 'w:' + copy.id;
+        // Also duplicate openings hosted on this wall
+        (this.plan.openings || []).slice().forEach((op) => {
+          if (op.hostKey === seg.key) {
+            this.plan.openings.push(Object.assign({}, clone(op), { id: FC.uid('op'), hostKey: newKey }));
+          }
+        });
+        this.select({ type: 'wall', key: newKey });
         this.changed({ rooms: true, furniture: false, save: true });
         this.toast('Duplicated wall', 'success');
         return;
-      }
-      if (sel.type === 'walls' && Array.isArray(sel.ids) && sel.ids.length) {
-        this.pushHistory();
-        const newKeys = [];
-        const newIds = [];
-        sel.ids.forEach((id) => {
-          const orig = this.plan.walls.find((w) => w.id === id);
-          if (!orig) return;
-          const copy = {
-            id: FC.uid('w'),
-            a: { x: FC.round(orig.a.x + 0.5, 3), y: FC.round(orig.a.y + 0.5, 3) },
-            b: { x: FC.round(orig.b.x + 0.5, 3), y: FC.round(orig.b.y + 0.5, 3) },
-          };
-          if (orig.virtual) copy.virtual = true;
-          if (orig.thickness) copy.thickness = orig.thickness;
-          this.plan.walls.push(copy);
-          newIds.push(copy.id);
-          newKeys.push('w:' + copy.id);
-        });
-        if (newIds.length) {
-          this.select({ type: 'walls', keys: newKeys, ids: newIds });
-          this.changed({ rooms: true, furniture: false, save: true });
-          this.toast(`Duplicated ${newIds.length} walls`, 'success');
-        }
       }
     }
 
@@ -1032,9 +1510,18 @@
       if (sel.type === 'walls') {
         const ids = sel.ids || [];
         const keys = sel.keys || [];
+        const furnIds = sel.furnitureIds || [];
+        const lightIds = sel.lightIds || [];
         this.pushHistory();
         this.plan.walls = this.plan.walls.filter((w) => !ids.includes(w.id));
         this.plan.openings = this.plan.openings.filter((op) => !keys.includes(op.hostKey) && !ids.some((id) => op.hostKey === 'w:' + id));
+        if (furnIds.length && this.furniture) {
+          this.furniture = this.furniture.filter((f) => !furnIds.includes(f.id));
+          this.plan.furniture = this.furniture;
+        }
+        if (lightIds.length && this.plan.lights) {
+          this.plan.lights = this.plan.lights.filter((l) => !lightIds.includes(l.id));
+        }
       } else if (sel.type === 'wall') {
         const seg = FC.segmentByKey(this.plan, sel.key);
         if (!seg) return;
@@ -1081,16 +1568,36 @@
       if (!isFinite(value)) return;
 
       if (field === 'width') {
-        let desired = FC.clamp(value, 0.3, Math.min(4, seg.len - 0.12));
-        op.width = desired;
-        if (!FC.canPlaceOpening(this.plan, op.hostKey, op.offset, op.width, op.id)) {
-          let fit = desired;
-          while (fit > 0.3 && !FC.canPlaceOpening(this.plan, op.hostKey, op.offset, fit, op.id)) {
-            fit = Math.round((fit - 0.05) * 100) / 100;
-          }
-          op.width = Math.max(0.3, fit);
+        if (!this._origOpeningOffset || this._origOpeningOffset.id !== op.id) {
+          this._origOpeningOffset = { id: op.id, offset: op.offset };
         }
-        op.offset = FC.clamp(op.offset, op.width / 2 + 0.03, seg.len - op.width / 2 - 0.03);
+        const baseOffset = this._origOpeningOffset.offset;
+        const maxAllowed = Math.min(4, Math.max(0.3, seg.len - 0.12));
+        let desired = FC.clamp(value, 0.3, maxAllowed);
+        let candOffset = FC.clamp(baseOffset, desired / 2 + 0.06, seg.len - desired / 2 - 0.06);
+        if (FC.canPlaceOpening(this.plan, op.hostKey, candOffset, desired, op.id)) {
+          op.width = FC.round(desired, 3);
+          op.offset = FC.round(candOffset, 3);
+        } else {
+          const slot = FC.findFreeOpeningOffset
+            ? FC.findFreeOpeningOffset(this.plan, op.hostKey, candOffset, desired, op.id)
+            : null;
+          if (slot) {
+            op.width = slot.width;
+            op.offset = slot.offset;
+          } else {
+            let fit = desired;
+            while (fit > 0.3) {
+              const testOff = FC.clamp(baseOffset, fit / 2 + 0.06, seg.len - fit / 2 - 0.06);
+              if (FC.canPlaceOpening(this.plan, op.hostKey, testOff, fit, op.id)) {
+                op.width = FC.round(fit, 3);
+                op.offset = FC.round(testOff, 3);
+                break;
+              }
+              fit = Math.round((fit - 0.05) * 100) / 100;
+            }
+          }
+        }
       } else if (field === 'height') {
         const maxHeight = op.kind === 'window' ? wallHeight - op.sill - 0.05 : wallHeight - 0.05;
         op.height = FC.clamp(value, 0.3, Math.max(0.4, maxHeight));
@@ -1098,15 +1605,17 @@
         op.sill = FC.clamp(value, 0, Math.max(0, wallHeight - op.height - 0.05));
       } else if (field === 'offsetFromA') {
         const desiredOffset = value + op.width / 2;
-        const clamped = FC.clamp(desiredOffset, op.width / 2 + 0.03, seg.len - op.width / 2 - 0.03);
+        const clamped = FC.clamp(desiredOffset, op.width / 2 + 0.06, seg.len - op.width / 2 - 0.06);
         if (FC.canPlaceOpening(this.plan, op.hostKey, clamped, op.width, op.id)) {
           op.offset = FC.round(clamped, 3);
+          this._origOpeningOffset = { id: op.id, offset: op.offset };
         }
       } else if (field === 'offsetFromB') {
         const desiredOffset = seg.len - value - op.width / 2;
-        const clamped = FC.clamp(desiredOffset, op.width / 2 + 0.03, seg.len - op.width / 2 - 0.03);
+        const clamped = FC.clamp(desiredOffset, op.width / 2 + 0.06, seg.len - op.width / 2 - 0.06);
         if (FC.canPlaceOpening(this.plan, op.hostKey, clamped, op.width, op.id)) {
           op.offset = FC.round(clamped, 3);
+          this._origOpeningOffset = { id: op.id, offset: op.offset };
         }
       }
 
@@ -2224,10 +2733,14 @@
       const b = FC.planBounds(this.plan);
       const curW = b ? b.w : 10;
       const curH = b ? b.d : 10;
+      const isImp = FC.isImperial && FC.isImperial(this.plan);
+      const fmtLen = (v) => (FC.formatLength ? FC.formatLength(v, this.plan) : v.toFixed(2) + ' m');
+      const unitLabel = isImp ? "feet / inches (e.g. 42' 6\" or 42.5)" : 'meters (e.g. 21.18)';
+      const placeholderStr = isImp ? "e.g. 42' 6\"" : 'e.g. 21.18';
 
       const html = `
         <div style="font-size:13px;color:var(--ink-2);margin-bottom:14px;line-height:1.5;">
-          Current plan dimensions: <b style="color:var(--ink-1);">${curW.toFixed(2)} m wide × ${curH.toFixed(2)} m deep</b>
+          Current plan dimensions: <b style="color:var(--ink-1);">${fmtLen(curW)} wide × ${fmtLen(curH)} deep</b>
         </div>
         <div style="background:var(--surface-sunken);border:1px solid var(--border-soft);border-radius:10px;padding:12px;margin-bottom:14px;">
           <div style="font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-3);margin-bottom:8px;">Quick Unit Conversions</div>
@@ -2242,8 +2755,8 @@
         </div>
         <div style="display:flex;flex-direction:column;gap:10px;">
           <label class="modal-input" style="display:flex;flex-direction:column;gap:4px;">
-            <span style="font-weight:600;font-size:12px;color:var(--ink-2);">Or specify Target Width (meters):</span>
-            <input type="number" id="targetWidthInput" step="0.1" min="0.5" max="1000" placeholder="e.g. 21.18" style="padding:8px 10px;background:var(--surface-card);border:1px solid var(--border-soft);border-radius:8px;color:var(--ink-1);">
+            <span style="font-weight:600;font-size:12px;color:var(--ink-2);">Or specify Target Width (${unitLabel}):</span>
+            <input type="text" id="targetWidthInput" placeholder="${placeholderStr}" style="padding:8px 10px;background:var(--surface-card);border:1px solid var(--border-soft);border-radius:8px;color:var(--ink-1);">
           </label>
           <label class="modal-input" style="display:flex;flex-direction:column;gap:4px;">
             <span style="font-weight:600;font-size:12px;color:var(--ink-2);">Or Custom Scale Factor multiplier:</span>
@@ -2273,8 +2786,8 @@
           });
 
           targetInput.addEventListener('input', () => {
-            const tw = parseFloat(targetInput.value);
-            if (tw > 0 && curW > 0) {
+            const tw = FC.parseLengthInput ? FC.parseLengthInput(targetInput.value, this.plan) : parseFloat(targetInput.value);
+            if (isFinite(tw) && tw > 0 && curW > 0) {
               customInput.value = (tw / curW).toFixed(4);
             }
           });
@@ -2319,7 +2832,8 @@
       if (this.plan.furnished) this.furniture = FC.furnishPlan(this.plan, this.rooms);
       this.select({ type: 'wall', key: 'w:' + res.mergedWall.id });
       this.ui.renderAll();
-      this.toast('Merged 2 parallel lines into 1 wall (' + Math.round(res.thickness * 100) + ' cm thick)', 'success');
+      const thickStr = FC.formatThickness ? FC.formatThickness(res.thickness, this.plan) : Math.round(res.thickness * 100) + ' cm';
+      this.toast('Merged 2 parallel lines into 1 wall (' + thickStr + ' thick)', 'success');
     }
 
     consolidateDoubleWalls() {
@@ -2505,16 +3019,16 @@
         }
         if (mod && key === 'c') {
           if (this.ui.selection) {
-            this._clipboardSelection = clone(this.ui.selection);
-            this.toast('Copied selection', 'info');
+            e.preventDefault();
+            this.copySelection();
           }
           return;
         }
         if (mod && key === 'v') {
-          if (this._clipboardSelection) {
-            this.ui.selection = clone(this._clipboardSelection);
-          }
-          if (this.ui.selection) {
+          if (this.hasClipboard()) {
+            e.preventDefault();
+            this.pasteClipboard();
+          } else if (this.ui.selection) {
             e.preventDefault();
             this.duplicateSelection();
           }

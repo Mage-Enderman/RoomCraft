@@ -219,27 +219,75 @@
     return Math.round(val * 100) + ' cm';
   };
 
-  FC.parseLengthInput = function (rawStr, planOrUnits) {
+  FC.formatInputLength = function (meters, planOrUnits, opts) {
+    const val = Number(meters) || 0;
+    if (FC.isImperial(planOrUnits)) {
+      if (opts && opts.thickness) {
+        const inches = val / FC.INCHES_TO_METERS;
+        return String(Math.round(inches * 10) / 10);
+      }
+      return FC.formatLength(val, 'ft', 2);
+    }
+    return FC.fmt(val, 2);
+  };
+
+  FC.inputUnitLabel = function (planOrUnits, opts) {
+    if (FC.isImperial(planOrUnits)) {
+      return opts && opts.thickness ? 'in' : 'ft/in';
+    }
+    return 'm';
+  };
+
+  function parseInchesPart(str) {
+    if (str == null) return 0;
+    const s = String(str).trim();
+    if (!s) return 0;
+    // Mixed fraction e.g. "6 1/2" or "6-1/2"
+    const mixed = s.match(/^(-?\d+)\s*(?:\s+|-)\s*(\d+)\s*\/\s*(\d+)$/);
+    if (mixed) {
+      const whole = parseFloat(mixed[1]) || 0;
+      const num = parseFloat(mixed[2]) || 0;
+      const den = parseFloat(mixed[3]) || 1;
+      const frac = den !== 0 ? num / den : 0;
+      return whole < 0 ? whole - frac : whole + frac;
+    }
+    // Simple fraction e.g. "1/2"
+    const fracMatch = s.match(/^(-?\d+)\s*\/\s*(\d+)$/);
+    if (fracMatch) {
+      const num = parseFloat(fracMatch[1]) || 0;
+      const den = parseFloat(fracMatch[2]) || 1;
+      return den !== 0 ? num / den : 0;
+    }
+    const n = parseFloat(s);
+    return isFinite(n) ? n : NaN;
+  }
+
+  FC.parseLengthInput = function (rawStr, planOrUnits, opts) {
     if (rawStr == null) return NaN;
-    const s = String(rawStr).trim();
+    let s = String(rawStr)
+      .trim()
+      .replace(/[’‘′]/g, "'")
+      .replace(/[“”″]/g, '"')
+      .replace(/''/g, '"');
     if (!s) return NaN;
 
-    // Explicit feet and inches e.g. 12' 6", 12'6, 12' 6.5"
-    const ftInMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*'\s*(?:(-?\d+(?:\.\d+)?)\s*(?:"|in)?)?$/i);
+    // Explicit feet and inches e.g. 12' 6", 12'6, 12' 6.5", 12' 6 1/2", 12ft 6in, 12 ft 6.5 in
+    const ftInMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*(?:'|ft|feet)\s*(?:[- ]?\s*(\d+(?:\.\d+)?(?:\s+\d+\s*\/\s*\d+)?|\d+\s*\/\s*\d+)\s*(?:"|in|inch|inches)?)?$/i);
     if (ftInMatch) {
       const ft = parseFloat(ftInMatch[1]) || 0;
-      const inc = ftInMatch[2] != null ? parseFloat(ftInMatch[2]) || 0 : 0;
+      const inc = ftInMatch[2] != null ? parseInchesPart(ftInMatch[2]) || 0 : 0;
       return ft * FC.FEET_TO_METERS + (ft < 0 ? -inc : inc) * FC.INCHES_TO_METERS;
     }
 
-    // Explicit inches only e.g. 36" or 36in
-    const inOnlyMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*(?:"|in)$/i);
+    // Explicit inches only e.g. 36", 36in, 36.5", 36 1/2", 1/2"
+    const inOnlyMatch = s.match(/^(-?\d+(?:\.\d+)?(?:\s+\d+\s*\/\s*\d+)?|-?\d+\s*\/\s*\d+)\s*(?:"|in|inch|inches)$/i);
     if (inOnlyMatch) {
-      return (parseFloat(inOnlyMatch[1]) || 0) * FC.INCHES_TO_METERS;
+      const inc = parseInchesPart(inOnlyMatch[1]);
+      return isFinite(inc) ? inc * FC.INCHES_TO_METERS : NaN;
     }
 
     // Explicit feet only e.g. 12ft
-    const ftOnlyMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*ft$/i);
+    const ftOnlyMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*(?:ft|feet)$/i);
     if (ftOnlyMatch) {
       return (parseFloat(ftOnlyMatch[1]) || 0) * FC.FEET_TO_METERS;
     }
@@ -252,19 +300,31 @@
     const mMatch = s.match(/^(-?\d+(?:\.\d+)?)\s*m$/i);
     if (mMatch) return parseFloat(mMatch[1]) || 0;
 
-    // Hyphenated feet-inches in imperial mode e.g. 12-6 -> 12' 6"
+    // Hyphenated or space-separated feet-inches in imperial mode e.g. 3-6 or 3 6 -> 3' 6"
     if (FC.isImperial(planOrUnits)) {
-      const dashMatch = s.match(/^(\d+)\s*-\s*(\d+(?:\.\d+)?)$/);
-      if (dashMatch) {
-        const ft = parseFloat(dashMatch[1]) || 0;
-        const inc = parseFloat(dashMatch[2]) || 0;
+      const dashOrSpaceMatch = s.match(/^(\d+)\s*(?:-|\s+)\s*(\d+(?:\.\d+)?)$/);
+      if (dashOrSpaceMatch) {
+        const ft = parseFloat(dashOrSpaceMatch[1]) || 0;
+        const inc = parseFloat(dashOrSpaceMatch[2]) || 0;
         return ft * FC.FEET_TO_METERS + inc * FC.INCHES_TO_METERS;
+      }
+      const fracOnly = s.match(/^(-?\d+(?:\s+\d+)?\s*\/\s*\d+)$/);
+      if (fracOnly) {
+        const v = parseInchesPart(fracOnly[1]);
+        if (isFinite(v)) {
+          return opts && opts.unit === 'in' ? v * FC.INCHES_TO_METERS : v * FC.FEET_TO_METERS;
+        }
       }
     }
 
+    if (!/^-?\d+(?:\.\d+)?$/.test(s)) return NaN;
     const num = parseFloat(s);
     if (!isFinite(num)) return NaN;
-    return FC.isImperial(planOrUnits) ? num * FC.FEET_TO_METERS : num;
+    if (FC.isImperial(planOrUnits)) {
+      if (opts && opts.unit === 'in') return num * FC.INCHES_TO_METERS;
+      return num * FC.FEET_TO_METERS;
+    }
+    return num;
   };
 
   FC.parseBoxInput = function (rawStr, planOrUnits) {
@@ -1272,6 +1332,31 @@
     return true;
   };
 
+  FC.findFreeOpeningOffset = function (plan, hostKey, preferredOffset, width, ignoreId) {
+    const segs = FC.getSegments(plan);
+    const seg = segs.find((s) => s.key === hostKey);
+    if (!seg || seg.len < 0.35) return null;
+    const w = Math.min(width || 0.9, Math.max(0.25, seg.len - 0.14));
+    const minOff = w / 2 + 0.06;
+    const maxOff = seg.len - w / 2 - 0.06;
+    if (maxOff < minOff) return null;
+    const pref = clamp(preferredOffset != null && isFinite(preferredOffset) ? preferredOffset : seg.len / 2, minOff, maxOff);
+    if (FC.canPlaceOpening(plan, hostKey, pref, w, ignoreId)) {
+      return { offset: FC.round(pref, 3), width: FC.round(w, 3) };
+    }
+    for (let step = 0.05; step <= seg.len; step = Math.round((step + 0.05) * 100) / 100) {
+      const c1 = pref + step;
+      if (c1 <= maxOff && FC.canPlaceOpening(plan, hostKey, c1, w, ignoreId)) {
+        return { offset: FC.round(c1, 3), width: FC.round(w, 3) };
+      }
+      const c2 = pref - step;
+      if (c2 >= minOff && FC.canPlaceOpening(plan, hostKey, c2, w, ignoreId)) {
+        return { offset: FC.round(c2, 3), width: FC.round(w, 3) };
+      }
+    }
+    return null;
+  };
+
   FC.nearestWall = function (plan, p, maxDist, filterFn) {
     let best = null;
     FC.getSegments(plan).forEach((seg) => {
@@ -1762,10 +1847,10 @@
   }
 
   FC.detectRooms = function (plan) {
-    if (!plan.outline || plan.outline.length < 3) return [];
-    const outline = plan.outline;
-    const outlineArea = Math.abs(FC.polygonArea(outline));
-    if (outlineArea < 0.5) return [];
+    const hasOutline = plan.outline && plan.outline.length >= 3 && Math.abs(FC.polygonArea(plan.outline)) >= 0.5;
+    const hasWalls = Array.isArray(plan.walls) && plan.walls.length >= 3;
+    const hasManual = Array.isArray(plan.manualRooms) && plan.manualRooms.length > 0;
+    if (!hasOutline && !hasWalls && !hasManual) return [];
 
     // Automatically close minor wall gaps before planar graph walk
     FC.closeWallGaps(plan, 0.22);
@@ -1803,9 +1888,7 @@
             const clean = FC.dedupePolygon(poly);
             if (clean.length >= 3) {
               const centroid = FC.polygonCentroid(clean);
-              if (FC.pointInPolygon(centroid, outline)) {
-                faces.push({ polygon: clean, area: Math.abs(FC.polygonArea(clean)), centroid });
-              }
+              faces.push({ polygon: clean, area: Math.abs(FC.polygonArea(clean)), centroid });
             }
           }
         }
@@ -1962,13 +2045,20 @@
   /* ------------------------------------------------------------------ */
 
   FC.planArea = function (plan) {
-    if (!plan.outline || plan.outline.length < 3) return 0;
-    return Math.abs(FC.polygonArea(plan.outline));
+    if (plan.outline && plan.outline.length >= 3) {
+      return Math.abs(FC.polygonArea(plan.outline));
+    }
+    if (Array.isArray(plan.rooms) && plan.rooms.length) {
+      return plan.rooms.reduce((sum, r) => sum + (Number(r.area) || 0), 0);
+    }
+    return 0;
   };
 
   FC.planBounds = function (plan) {
-    if (plan.outline && plan.outline.length >= 3) return FC.polygonBounds(plan.outline);
     const pts = [];
+    if (plan.outline && plan.outline.length >= 3) {
+      plan.outline.forEach((p) => pts.push(p));
+    }
     (plan.walls || []).forEach((w) => pts.push(w.a, w.b));
     if (pts.length) return FC.polygonBounds(pts);
     return { x0: 0, y0: 0, x1: 12, y1: 8, w: 12, d: 8, cx: 6, cy: 4 };
