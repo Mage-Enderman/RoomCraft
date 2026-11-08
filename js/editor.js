@@ -2032,11 +2032,20 @@
       } else if (hit && hit.type === 'furniture') {
         const f = hit.furniture;
         this.app.select({ type: 'furniture', id: f.id });
+        const fRoom = f.roomId && this.app.rooms ? this.app.rooms.find((r) => r.id === f.roomId) : null;
         items.push({
           label: 'Rotate 90°',
           icon: 'refresh',
           action: () => this.app.rotateSelectedFurniture(Math.PI / 2),
         });
+        if (fRoom) {
+          const rName = fRoom.name || (FC.roomTypes[fRoom.type] && FC.roomTypes[fRoom.type].label) || 'Room';
+          items.push({
+            label: `Regenerate ${rName} interior`,
+            icon: 'sparkles',
+            action: () => this.app.regenerateRoomInterior && this.app.regenerateRoomInterior(fRoom.id),
+          });
+        }
         items.push({
           label: 'Copy ' + f.kind,
           icon: 'copy',
@@ -2172,6 +2181,12 @@
         const room = hit.room;
         this.app.select({ type: 'room', id: room.id });
         const rName = room.name || (FC.roomTypes[room.type] && FC.roomTypes[room.type].label) || 'Room';
+        items.push({
+          label: `Regenerate ${rName} interior`,
+          icon: 'sparkles',
+          action: () => this.app.regenerateRoomInterior && this.app.regenerateRoomInterior(room.id),
+        });
+        items.push({ separator: true });
         items.push({
           label: `Copy ${rName} (walls & contents)`,
           icon: 'copy',
@@ -3258,6 +3273,25 @@
             ctx.lineTo(Math.cos(ang) * (w * 0.38), Math.sin(ang) * (d * 0.38));
           }
           ctx.strokeStyle = 'rgba(44,44,52,0.32)';
+          ctx.stroke();
+          // Backrest at -d/2 (chair faces +d/2 toward desk)
+          const backH = Math.max(2.5, d * 0.16);
+          this.roundRect(-w * 0.38, -d / 2 + 1.5, w * 0.76, backH, Math.min(3, backH * 0.5));
+          ctx.fillStyle = 'rgba(44,44,52,0.22)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(44,44,52,0.45)';
+          ctx.stroke();
+          // Armrests on left/right sides
+          const armW = Math.max(1.8, w * 0.11);
+          const armD = d * 0.46;
+          ctx.strokeRect(-w / 2 + 1.5, -d * 0.18, armW, armD);
+          ctx.strokeRect(w / 2 - 1.5 - armW, -d * 0.18, armW, armD);
+        } else if (it.kind === 'chair' || it.kind === 'patioChair') {
+          const backH = Math.max(2, d * 0.15);
+          this.roundRect(-w * 0.4, -d / 2 + 1.5, w * 0.8, backH, 2);
+          ctx.fillStyle = 'rgba(44,44,52,0.20)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(44,44,52,0.42)';
           ctx.stroke();
         } else if (it.kind === 'planterBox') {
           ctx.fillStyle = 'rgba(93,122,83,0.25)';

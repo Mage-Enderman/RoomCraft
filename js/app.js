@@ -172,6 +172,7 @@
             centroid: r.centroid || (poly.length >= 3 ? FC.polygonCentroid(poly) : { x: 0, y: 0 }),
             bounds: r.bounds || (poly.length >= 3 ? FC.polygonBounds(poly) : null),
             isManual: r.isManual != null ? r.isManual : true,
+            layoutVariant: r.layoutVariant != null ? r.layoutVariant : undefined,
           });
         });
       } else {
@@ -222,6 +223,7 @@
             }
           : null,
         isManual: !!r.isManual,
+        layoutVariant: r.layoutVariant != null ? r.layoutVariant : undefined,
       }));
     }
 
@@ -408,6 +410,7 @@
             centroid: r.centroid || (poly.length >= 3 ? FC.polygonCentroid(poly) : { x: 0, y: 0 }),
             bounds: r.bounds || (poly.length >= 3 ? FC.polygonBounds(poly) : null),
             isManual: r.isManual != null ? r.isManual : true,
+            layoutVariant: r.layoutVariant != null ? r.layoutVariant : undefined,
           });
         });
       } else {
@@ -710,7 +713,9 @@
       room.type = type;
       if (!room.name || room.name === oldLabel) room.name = FC.roomTypes[type].label;
       this.plan.rooms = this._roomMeta();
-      if (this.plan.furnished) this.recomputeFurniture();
+      if (this.plan.furnished) {
+        this.regenerateRoomInterior(room.id, { skipHistory: true, silent: true });
+      }
       this.changed({ save: true });
       if (this.ui) this.ui.renderAll();
       if (this.viewer) this.viewer.markDirty();
@@ -1812,6 +1817,64 @@
       if (this.viewer) this.viewer.markDirty();
       const count = FC.furnitureCount(this.furniture);
       this.toast(`Interior variation #${this.plan.layoutVariation} generated! (${count} pieces across ${this.rooms.length} rooms)`, 'success');
+    }
+
+    regenerateRoomInterior(roomId, opts = {}) {
+      const targetId = roomId || (this.ui && this.ui.selection && this.ui.selection.type === 'room' ? this.ui.selection.id : null);
+      const room = (this.rooms || []).find((r) => r.id === targetId);
+      if (!room) {
+        if (!opts.silent) this.toast('Select a room first to regenerate its interior.', 'info');
+        return;
+      }
+      if (!opts.skipHistory) this.pushHistory();
+      this.plan.furnished = true;
+
+      const isItemInRoom = (f) => {
+        if (f.roomId) return f.roomId === room.id;
+        if (room.polygon && room.polygon.length >= 3) {
+          return FC.pointInPolygon({ x: f.x, y: f.y }, room.polygon);
+        }
+        return false;
+      };
+
+      const prevRoomItems = (this.furniture || []).filter(isItemInRoom);
+      const otherItems = (this.furniture || []).filter((f) => !isItemInRoom(f));
+      const sigOf = (arr) =>
+        arr
+          .map((f) => `${f.kind}:${Math.round(f.x * 20)},${Math.round(f.y * 20)},${Math.round((f.rot || 0) * 10)}`)
+          .sort()
+          .join('|');
+      const prevSig = sigOf(prevRoomItems);
+
+      let merged = otherItems;
+      let nextVar = (room.layoutVariant != null ? room.layoutVariant : 0) + 1;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        room.layoutVariant = nextVar + attempt;
+        merged = FC.furnishPlan(this.plan, [room], otherItems);
+        const newRoomItems = merged.slice(otherItems.length);
+        if (!prevRoomItems.length || sigOf(newRoomItems) !== prevSig) {
+          break;
+        }
+      }
+
+      const meta = (this.plan.rooms || []).find((m) => m.id === room.id);
+      if (meta) meta.layoutVariant = room.layoutVariant;
+      if (room.isManual && Array.isArray(this.plan.manualRooms)) {
+        const mr = this.plan.manualRooms.find((m) => m.id === room.id);
+        if (mr) mr.layoutVariant = room.layoutVariant;
+      }
+
+      this.furniture = merged;
+      this.plan.furniture = this.furniture;
+      this.changed({ furniture: false, save: true });
+      if (this.ui) this.ui.renderAll();
+      if (this.viewer) this.viewer.markDirty();
+
+      if (!opts.silent) {
+        const roomItemsCount = merged.length - otherItems.length;
+        const rName = room.name || (FC.roomTypes[room.type] && FC.roomTypes[room.type].label) || 'Room';
+        this.toast(`Regenerated ${rName} interior (${roomItemsCount} piece${roomItemsCount === 1 ? '' : 's'})`, 'success');
+      }
     }
 
     /* ---------------------------------------------------------------- */

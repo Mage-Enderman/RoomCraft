@@ -1153,7 +1153,20 @@
             hinge: o.hinge === 'right' ? 'right' : 'left',
           }))
       : [];
-    plan.rooms = Array.isArray(raw.rooms) ? raw.rooms : [];
+    plan.rooms = Array.isArray(raw.rooms)
+      ? raw.rooms.map((r) =>
+          r && typeof r === 'object'
+            ? Object.assign({}, r, r.layoutVariant != null ? { layoutVariant: parseInt(r.layoutVariant, 10) || 0 } : {})
+            : r
+        )
+      : [];
+    if (Array.isArray(raw.manualRooms)) {
+      plan.manualRooms = raw.manualRooms.map((mr) =>
+        mr && typeof mr === 'object'
+          ? Object.assign({}, mr, mr.layoutVariant != null ? { layoutVariant: parseInt(mr.layoutVariant, 10) || 0 } : {})
+          : mr
+      );
+    }
     plan.autoDetectRooms = raw.autoDetectRooms !== false;
     plan.lights = Array.isArray(raw.lights)
       ? raw.lights.map((l) => ({
@@ -1919,6 +1932,7 @@
           centroid,
           bounds: mr.bounds || FC.polygonBounds(clean),
           isManual: true,
+          layoutVariant: mr.layoutVariant != null ? mr.layoutVariant : undefined,
         });
       });
     }
@@ -1968,6 +1982,9 @@
       if (prev) {
         r.type = prev.type;
         r.name = prev.name || '';
+        if (prev.layoutVariant != null && r.layoutVariant == null) {
+          r.layoutVariant = prev.layoutVariant;
+        }
         attempted.add(prev.id);
       }
     });
@@ -2580,16 +2597,36 @@
   FC.itemBlocksCirculation = function (item, doorZones, roomPoly) {
     if (FC.isNonSolid(item) || item.elev > 0.5) return false;
     const rule = FC.ITEM_RULES[item.kind];
-    // Perimeter and corner wall items hug walls and don't block center corridors
-    if (rule && (rule.archetype === 'wall-perimeter' || rule.archetype === 'corner' || rule.archetype === 'relative-stacked')) {
+    // Perimeter, corner, stacked, head-to-wall, and tucked chairs hug walls/anchors and don't block center corridors
+    if (
+      rule &&
+      (rule.archetype === 'wall-perimeter' ||
+        rule.archetype === 'corner' ||
+        rule.archetype === 'relative-stacked' ||
+        rule.archetype === 'relative-tuck' ||
+        rule.archetype === 'head-to-wall')
+    ) {
       return false;
     }
+    let activeDoors = doorZones;
+    if (roomPoly && roomPoly.length >= 3) {
+      const n = roomPoly.length;
+      activeDoors = doorZones.filter((dz) => {
+        for (let i = 0; i < n; i++) {
+          const p1 = roomPoly[i];
+          const p2 = roomPoly[(i + 1) % n];
+          if (FC.pointSegment(dz, p1, p2).dist < 0.35) return true;
+        }
+        return false;
+      });
+    }
+    if (activeDoors.length < 2) return false;
     const itemPt = { x: item.x, y: item.y };
     const clearance = (rule && rule.clearance) || 0.65;
-    for (let i = 0; i < doorZones.length; i++) {
-      for (let j = i + 1; j < doorZones.length; j++) {
-        const d1 = doorZones[i];
-        const d2 = doorZones[j];
+    for (let i = 0; i < activeDoors.length; i++) {
+      for (let j = i + 1; j < activeDoors.length; j++) {
+        const d1 = activeDoors[i];
+        const d2 = activeDoors[j];
         const h = FC.pointSegment(itemPt, d1, d2);
         if (h.dist < clearance) {
           return true;
@@ -2695,9 +2732,15 @@
     return matched;
   };
 
-  FC.findWallPlacement = function (plan, room, segs, itemKind, itemW, itemD, placedItems, doorZones, filterFn, roomWindows) {
-    const walls = FC.findWallSegmentsForRoom(room, segs);
+  FC.findWallPlacement = function (plan, room, segs, itemKind, itemW, itemD, placedItems, doorZones, filterFn, roomWindows, varSeed) {
+    let walls = FC.findWallSegmentsForRoom(room, segs);
     walls.sort((a, b) => b.len - a.len);
+
+    const seed = varSeed != null ? varSeed : (room && room._varSeed) || 0;
+    if (seed > 0 && walls.length > 1) {
+      const shift = seed % walls.length;
+      walls = walls.slice(shift).concat(walls.slice(0, shift));
+    }
 
     const rule = (FC.ITEM_RULES && FC.ITEM_RULES[itemKind]) || {};
     const isWindowSensitive = rule.blocksWindow === 'always' || (FURNITURE_HEIGHTS[itemKind] || 0.6) > 1.05;
@@ -2706,19 +2749,23 @@
     for (let i = 0; i < walls.length; i++) {
       const w = walls[i];
       if (filterFn && !filterFn(w)) continue;
-      if (w.len < itemW + 0.1) continue;
+      if (w.len < itemW + 0.08) continue;
 
       const uX = (w.p2.x - w.p1.x) / w.len;
       const uY = (w.p2.y - w.p1.y) / w.len;
       const maxOffset = (w.len - itemW) / 2;
-      const offsets = [0];
+      let offsets = [0];
       if (maxOffset >= 0.25) offsets.push(0.25, -0.25);
       if (maxOffset >= 0.55) offsets.push(0.55, -0.55);
+      if (seed > 0 && offsets.length > 1) {
+        const oShift = Math.floor(seed / Math.max(1, walls.length)) % offsets.length;
+        offsets = offsets.slice(oShift).concat(offsets.slice(0, oShift));
+      }
 
       for (let o = 0; o < offsets.length; o++) {
         const off = offsets[o];
-        const cx = w.mid.x + uX * off + w.nx * (itemD / 2 + 0.04);
-        const cy = w.mid.y + uY * off + w.ny * (itemD / 2 + 0.04);
+        const cx = w.mid.x + uX * off + w.nx * (itemD / 2 + 0.05);
+        const cy = w.mid.y + uY * off + w.ny * (itemD / 2 + 0.05);
         const def = (FC.furnitureCatalog && FC.furnitureCatalog[itemKind]) || {};
         const elev = rule.elev != null ? rule.elev : (def.elev != null ? def.elev : 0);
         const h = def.h || (FC.FURNITURE_HEIGHTS && FC.FURNITURE_HEIGHTS[itemKind]) || 0.6;
@@ -2880,11 +2927,11 @@
     return corners;
   };
 
-  FC.furnishPlan = function (plan, rooms) {
+  FC.furnishPlan = function (plan, rooms, existingItems) {
     if (!plan.furnished) return [];
     const density = plan.density == null ? 1 : plan.density;
-    const items = [];
-    let count = 0;
+    const items = Array.isArray(existingItems) ? existingItems.slice() : [];
+    let count = items.length;
     const globalVar = parseInt(plan.layoutVariation, 10) || 0;
 
     const wallSegments = FC.getSegments(plan);
@@ -2951,7 +2998,9 @@
       const cx = (x0 + x1) / 2;
       const cy = (y0 + y1) / 2;
       const type = room.type || 'living';
-      const variant = (globalVar + (room.layoutVariant != null ? room.layoutVariant : roomIdx)) % 3;
+      const rawVar = globalVar + (room.layoutVariant != null ? room.layoutVariant : roomIdx);
+      const variant = rawVar % 3;
+      room._varSeed = rawVar;
 
       if (type === 'bedroom') {
         const roomWins = FC.findRoomWindows(room, plan, wallSegments);
@@ -3026,6 +3075,11 @@
               { x: cx + bedW / 2 + 0.28, y: y0 + 0.32 }
             ]
           });
+        }
+
+        if (rawVar > 0 && bedCandidates.length > 1) {
+          const bShift = rawVar % bedCandidates.length;
+          bedCandidates.push(...bedCandidates.splice(0, bShift));
         }
 
         // Try candidates that don't block windows first
@@ -3260,13 +3314,170 @@
           add(room, 'artwork', sb.x, sb.y, Math.min(1.2, sb.w), 0.04, sb.rot, { elev: 1.35, h: 0.75, decor: true });
         }
       } else if (type === 'office') {
-        const dw = Math.min(1.6, W * 0.6);
-        add(room, 'desk', cx, y0 + 0.38, dw, 0.65, 0, { mat: 'wood' });
-        add(room, 'monitor', cx, y0 + 0.22, 0.6, 0.12, 0, { mat: 'metal', elev: 0.78, h: 0.4 });
-        add(room, 'officeChair', cx, y0 + 0.95, 0.58, 0.58, Math.PI, { mat: 'fabric' });
-        add(room, 'rug', cx, cy + 0.3, Math.min(2.1, W * 0.6), Math.min(1.5, D * 0.4), 0, { mat: 'rug', decor: true });
-        const bs = FC.findWallPlacement(plan, room, wallSegments, 'bookshelf', Math.min(1.6, Math.max(0.9, W * 0.4)), 0.35, items, doorZones);
+        const roomWins = FC.findRoomWindows(room, plan, wallSegments);
+        const walls = FC.findWallSegmentsForRoom(room, wallSegments);
+        walls.sort((a, b) => b.len - a.len);
+
+        const deskW = Math.min(1.6, Math.max(1.1, W * 0.55));
+        const deskD = 0.65;
+        const chairW = 0.58;
+        const chairD = 0.58;
+
+        const candidates = [];
+        const usedWinWalls = new Set();
+
+        // 1. Window-facing desk candidates (desk placed along window wall looking out/into room)
+        roomWins.forEach((win) => {
+          const w = walls.find((wl) => FC.pointSegment({ x: win.x, y: win.y }, wl.p1, wl.p2).dist < 0.25);
+          if (!w || w.len < deskW + 0.08) return;
+          usedWinWalls.add(w);
+          const uX = (w.p2.x - w.p1.x) / w.len;
+          const uY = (w.p2.y - w.p1.y) / w.len;
+          const proj = (win.x - w.mid.x) * uX + (win.y - w.mid.y) * uY;
+          const maxOff = Math.max(0, (w.len - deskW) / 2 - 0.06);
+          const off = clamp(proj, -maxOff, maxOff);
+          const dx = w.mid.x + uX * off + w.nx * (deskD / 2 + 0.06);
+          const dy = w.mid.y + uY * off + w.ny * (deskD / 2 + 0.06);
+          candidates.push({
+            kind: 'window-wall',
+            wall: w,
+            x: dx,
+            y: dy,
+            rot: w.rot,
+            nx: w.nx,
+            ny: w.ny,
+          });
+        });
+
+        // 2. Side / perimeter wall desk candidates (center first, then shifted offsets)
+        const centerWallCands = [];
+        const shiftedWallCands = [];
+        walls.forEach((w) => {
+          if (w.len < deskW + 0.08) return;
+          const uX = (w.p2.x - w.p1.x) / w.len;
+          const uY = (w.p2.y - w.p1.y) / w.len;
+          if (!usedWinWalls.has(w)) {
+            centerWallCands.push({
+              kind: 'wall-center',
+              wall: w,
+              x: w.mid.x + w.nx * (deskD / 2 + 0.06),
+              y: w.mid.y + w.ny * (deskD / 2 + 0.06),
+              rot: w.rot,
+              nx: w.nx,
+              ny: w.ny,
+            });
+          }
+          if (w.len >= deskW + 0.7) {
+            const off = Math.min(0.45, (w.len - deskW) / 2 - 0.1);
+            [off, -off].forEach((sOff) => {
+              shiftedWallCands.push({
+                kind: 'wall-offset',
+                wall: w,
+                x: w.mid.x + uX * sOff + w.nx * (deskD / 2 + 0.06),
+                y: w.mid.y + uY * sOff + w.ny * (deskD / 2 + 0.06),
+                rot: w.rot,
+                nx: w.nx,
+                ny: w.ny,
+              });
+            });
+          }
+        });
+        candidates.push(...centerWallCands);
+
+        // 3. Floating executive desk candidates in the primary zone
+        candidates.push({
+          kind: 'floating-top',
+          wall: null,
+          x: cx,
+          y: y0 + 0.42,
+          rot: 0,
+          nx: 0,
+          ny: 1,
+        });
+        if (D >= 2.6) {
+          candidates.push({
+            kind: 'floating-center',
+            wall: null,
+            x: cx,
+            y: cy + 0.15,
+            rot: Math.PI,
+            nx: 0,
+            ny: -1,
+          });
+        }
+        candidates.push(...shiftedWallCands);
+
+        // Filter valid candidates where both the desk and its ergonomic chair fit cleanly
+        const validCands = candidates.filter((c) => {
+          const testDesk = {
+            kind: 'desk',
+            x: FC.round(c.x, 3),
+            y: FC.round(c.y, 3),
+            w: FC.round(deskW, 3),
+            d: FC.round(deskD, 3),
+            rot: FC.round(c.rot, 3),
+            h: FURNITURE_HEIGHTS.desk || 0.75,
+            elev: 0,
+          };
+          const testChair = {
+            kind: 'officeChair',
+            x: FC.round(c.x + c.nx * 0.55, 3),
+            y: FC.round(c.y + c.ny * 0.55, 3),
+            w: chairW,
+            d: chairD,
+            rot: FC.round(c.rot + Math.PI, 3),
+            h: FURNITURE_HEIGHTS.officeChair || 0.9,
+            elev: 0,
+          };
+          return (
+            FC.canPlaceFurniture(plan, room, testDesk, items, doorZones, wallSegments) &&
+            FC.canPlaceFurniture(plan, room, testChair, items, doorZones, wallSegments)
+          );
+        });
+
+        let chosen = validCands.length
+          ? validCands[rawVar % validCands.length]
+          : candidates[0];
+
+        let placedDesk = null;
+        let deskWall = null;
+        if (chosen) {
+          placedDesk = add(room, 'desk', chosen.x, chosen.y, deskW, deskD, chosen.rot, { mat: 'wood', canNudge: false }) ||
+            add(room, 'desk', chosen.x, chosen.y, deskW, deskD, chosen.rot, { mat: 'wood' });
+          if (placedDesk) {
+            deskWall = chosen.wall;
+            const monX = placedDesk.x - chosen.nx * 0.18;
+            const monY = placedDesk.y - chosen.ny * 0.18;
+            add(room, 'monitor', monX, monY, 0.6, 0.12, placedDesk.rot, { mat: 'metal', elev: 0.76, h: 0.42, canNudge: false }) ||
+              add(room, 'monitor', placedDesk.x, placedDesk.y, 0.6, 0.12, placedDesk.rot, { mat: 'metal', elev: 0.76, h: 0.42 });
+            const chX = placedDesk.x + chosen.nx * 0.55;
+            const chY = placedDesk.y + chosen.ny * 0.55;
+            add(room, 'officeChair', chX, chY, chairW, chairD, placedDesk.rot + Math.PI, { mat: 'fabric', canNudge: false }) ||
+              add(room, 'officeChair', chX, chY, chairW, chairD, placedDesk.rot + Math.PI, { mat: 'fabric' });
+          }
+        }
+
+        // Bookshelf on a remaining wall (varies with rawVar)
+        const bsW = Math.min(1.6, Math.max(0.9, W * 0.4));
+        const bs =
+          FC.findWallPlacement(plan, room, wallSegments, 'bookshelf', bsW, 0.35, items, doorZones, (w) => w !== deskWall, roomWins, rawVar) ||
+          FC.findWallPlacement(plan, room, wallSegments, 'bookshelf', bsW, 0.35, items, doorZones, null, roomWins, rawVar);
         if (bs) add(room, 'bookshelf', bs.x, bs.y, bs.w, bs.d, bs.rot, { mat: 'wood' });
+
+        // Area rug in open zone or anchored near workstation
+        const rugW = Math.min(2.1, W * 0.58);
+        const rugD = Math.min(1.5, D * 0.42);
+        const rugX = chosen && chosen.wall ? cx : cx;
+        const rugY = chosen && chosen.wall ? cy : cy + 0.3;
+        add(room, 'rug', rugX, rugY, rugW, rugD, 0, { mat: 'rug', decor: true });
+
+        // Optional reading armchair or artwork in larger offices on alternate variations
+        if (room.area >= 12 && rawVar % 2 === 1) {
+          const arm = FC.findCornerPlacement(room, 'armchair', 0.82, 0.82, items, doorZones, roomWins, wallSegments);
+          if (arm) add(room, 'armchair', arm.x, arm.y, 0.82, 0.82, arm.rot, { mat: 'fabric' });
+        }
+        const art = FC.findWallPlacement(plan, room, wallSegments, 'artwork', 1.0, 0.04, items, doorZones, (w) => w !== deskWall, roomWins, rawVar + 1);
+        if (art) add(room, 'artwork', art.x, art.y, art.w, art.d, art.rot, { elev: 1.35, h: 0.75, decor: true });
       } else if (type === 'closet' || type === 'storage') {
         const shelfW = type === 'closet' ? Math.min(1.2, Math.max(0.8, W - 0.3)) : Math.min(1.8, Math.max(0.9, W - 0.4));
         const sPlaced = FC.findWallPlacement(plan, room, wallSegments, 'shelf', shelfW, 0.35, items, doorZones);

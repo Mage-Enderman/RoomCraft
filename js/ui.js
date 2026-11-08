@@ -749,7 +749,7 @@
           </div>
           <div class="btn-row two" style="margin-top:10px;">
             <button class="btn soft sm" data-action="tool" data-tool="divider" title="Draw an invisible room divider to partition this space">${I('divider')} Split with divider</button>
-            <button class="btn soft sm" data-action="furnish-room" data-room="${room.id}" title="Re-furnish this room">${I('magic')} Re-furnish</button>
+            <button class="btn soft sm" data-action="furnish-room" data-room="${room.id}" title="Regenerate furniture layout in this room">${I('sparkles')} Regenerate room</button>
           </div>
           <div class="btn-row two" style="margin-top:6px;">
             <button class="btn soft sm" data-action="copy-selection" title="Copy room walls, doors, windows & furniture (Ctrl+C) to paste in any floorplan">${I('copy')} Copy room</button>
@@ -907,11 +907,12 @@
               const t = FC.roomTypes[r.type] || FC.roomTypes.living;
               const active = selectedRoom && selectedRoom.id === r.id;
               const areaStr = FC.formatArea ? FC.formatArea(r.area, this.app.plan, 1) : FC.fmt(r.area, 1) + ' m²';
-              return `<button class="room-row ${active ? 'active' : ''}" data-action="focus-room" data-room="${r.id}">
+              return `<div class="room-row ${active ? 'active' : ''}" data-action="focus-room" data-room="${r.id}" style="cursor:pointer;">
                 <span class="room-dot" style="background:${t.color}"></span>
                 <span class="room-main"><b>${esc(r.name || t.label)}</b><span>${areaStr}</span></span>
                 <span class="room-kind">${t.label.replace(' room', '')}</span>
-              </button>`;
+                <button class="icon-btn soft xs" data-action="furnish-room" data-room="${r.id}" title="Regenerate ${esc(r.name || t.label)} interior">${I('refresh')}</button>
+              </div>`;
             })
             .join('')}
         </div>` : `<p class="helper" style="margin-top:10px;">No enclosed rooms yet. Draw walls or click <b>Draw room</b> above to define spaces.</p>`}
@@ -950,14 +951,31 @@
 
     generateStepHTML() {
       const plan = this.app.plan;
+      const rooms = this.app.rooms || [];
       const count = FC.furnitureCount(this.app.furniture);
       return `<section class="panel-block">
         ${this.moduleHead('Interior', plan.furnished ? count + ' pieces placed' : 'Not furnished')}
-        <p class="helper">${plan.furnished ? 'Furniture is generated per room type. Change a room type or wall layout and it reflows automatically.' : 'Choose a style, then generate a furnished interior tailored to each room.'}</p>
+        <p class="helper">${plan.furnished ? 'Furniture is generated per room type. Change a room type or wall layout and it reflows automatically, or regenerate individual rooms below.' : 'Choose a style, then generate a furnished interior tailored to each room.'}</p>
         <div class="density-row">
           <div class="field-head"><span>Furnishing level</span><span class="value" data-density-value>${plan.density < 0.8 ? 'Essential' : plan.density > 1.15 ? 'Rich' : 'Comfort'}</span></div>
           <input type="range" data-density min="0.5" max="1.5" step="0.05" value="${plan.density}">
         </div>
+        ${rooms.length ? `<div style="margin-top:12px;">
+          <div class="micro-label" style="margin-bottom:6px;">Regenerate single room</div>
+          <div class="room-list">
+            ${rooms
+              .map((r) => {
+                const t = FC.roomTypes[r.type] || FC.roomTypes.living;
+                const rPieces = (this.app.furniture || []).filter((f) => f.roomId === r.id).length;
+                return `<div class="room-row" data-action="focus-room" data-room="${r.id}" style="cursor:pointer;">
+                  <span class="room-dot" style="background:${t.color}"></span>
+                  <span class="room-main"><b>${esc(r.name || t.label)}</b><span>${rPieces} piece${rPieces === 1 ? '' : 's'}</span></span>
+                  <button class="btn soft xs" data-action="furnish-room" data-room="${r.id}" title="Regenerate ${esc(r.name || t.label)} interior">${I('refresh')} Regenerate</button>
+                </div>`;
+              })
+              .join('')}
+          </div>
+        </div>` : ''}
         <button class="btn soft sm" style="width:100%;margin-top:12px;" data-action="open-furniture-catalog">${I('plus')} Browse & Add Furniture</button>
         ${plan.furnished ? `<button class="danger-link subtle" data-action="clear-furniture" style="margin-top:10px;">${I('trash')} Clear furniture</button>` : ''}
       </section>`;
@@ -1545,8 +1563,7 @@
           app.deleteRoom(el.dataset.room);
           break;
         case 'furnish-room':
-          app.recomputeFurniture();
-          this.renderAll();
+          app.regenerateRoomInterior(el.dataset.room);
           break;
         case 'open-furniture-catalog':
           app.openFurnitureCatalog(el.dataset.room || null);
