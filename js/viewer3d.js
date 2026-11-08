@@ -182,14 +182,27 @@
       }
       this.wallMats = [];
       this.roomLights = [];
+      this.slabMesh = null;
+      this.floorMeshes = [];
+      this.wallMeshes = [];
+      this.openingGroups = [];
+      this.ceilingMeshes = [];
+      this.lightFixtureGroups = [];
+
       this.world = new THREE.Group();
+      this.world.name = 'World';
       this.scene.add(this.world);
 
       this.structure = new THREE.Group();
-      this.furnitureGroup = new THREE.Group();
-      this.userLightsGroup = new THREE.Group();
+      this.structure.name = 'Structure';
       this.world.add(this.structure);
+
+      this.furnitureGroup = new THREE.Group();
+      this.furnitureGroup.name = 'Furniture';
       this.world.add(this.furnitureGroup);
+
+      this.userLightsGroup = new THREE.Group();
+      this.userLightsGroup.name = 'Lighting';
       this.world.add(this.userLightsGroup);
 
       const style = (plan.style === 'custom' && plan.customStyle)
@@ -200,7 +213,7 @@
       const b = FC.planBounds(plan);
 
       this.buildGround(b, style);
-      this.buildSlab(plan, style, H);
+      this.buildSlab(plan, style, H, b);
       this.buildFloors(plan, this.app.rooms || [], style);
       this.buildWalls(plan, FC.getSegments(plan), style, H);
       if (plan.furnished) this.buildFurniture(plan, this.app.furniture || [], style, H);
@@ -219,6 +232,7 @@
         disposeObject(this.world);
       }
       this.world = new THREE.Group();
+      this.world.name = 'World';
       this.scene.add(this.world);
       const b = { cx: 6, cy: 4, w: 12, d: 8 };
       this.buildGround(b, FC.styles.scandinavian);
@@ -232,8 +246,11 @@
     buildGround(b, style) {
       const size = 200;
       const geo = new THREE.CircleGeometry(size / 2, 64);
+      geo.name = 'Ground_Plane';
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color('#d7cdbf'), roughness: 1, metalness: 0 });
+      mat.name = 'Ground_Material';
       const ground = new THREE.Mesh(geo, mat);
+      ground.name = 'Ground_Plane';
       ground.rotation.x = -Math.PI / 2;
       ground.position.set(b.cx, -0.22, b.cy);
       ground.receiveShadow = true;
@@ -241,6 +258,7 @@
 
       const gridSize = Math.max(28, Math.ceil(Math.max(b.w, b.d) + 16));
       const grid = new THREE.GridHelper(gridSize, Math.round(gridSize * 2), 0xcfc8bc, 0xdcd6cb);
+      grid.name = 'World_Grid';
       grid.position.set(b.cx, -0.2, b.cy);
       grid.material.opacity = 0.38;
       grid.material.transparent = true;
@@ -249,7 +267,8 @@
       this.grid = grid;
     }
 
-    buildSlab(plan, style, H) {
+    buildSlab(plan, style, H, bounds) {
+      const b = bounds || FC.planBounds(plan);
       const shape = new THREE.Shape();
       plan.outline.forEach((p, i) => {
         if (i === 0) shape.moveTo(p.x, -p.y);
@@ -258,12 +277,17 @@
       shape.closePath();
       const geo = new THREE.ExtrudeGeometry(shape, { depth: plan.settings.slabThickness, bevelEnabled: false });
       geo.rotateX(-Math.PI / 2);
-      geo.translate(0, -plan.settings.slabThickness, 0);
+      geo.translate(-b.cx, -plan.settings.slabThickness, -b.cy);
+      geo.name = 'Foundation_Slab';
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(blend(style.stone, '#8b8378', 0.25)), roughness: 0.95 });
+      mat.name = 'Foundation_Slab_Concrete';
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.y = -0.001;
+      mesh.name = 'Foundation_Slab';
+      mesh.position.set(b.cx, -0.001, b.cy);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      mesh.userData = { isSlab: true };
+      this.slabMesh = mesh;
       this.world.add(mesh);
     }
 
@@ -276,8 +300,16 @@
     }
 
     buildFloors(plan, rooms, style) {
-      rooms.forEach((room) => {
+      this.floorMeshes = [];
+      rooms.forEach((room, idx) => {
         if (!room.polygon || room.polygon.length < 3) return;
+        const cx = (room.centroid && room.centroid.x) || 0;
+        const cy = (room.centroid && room.centroid.y) || 0;
+        const roomLabel = String(room.name || (FC.roomTypes[room.type] && FC.roomTypes[room.type].label) || ('Room_' + (idx + 1)))
+          .replace(/&/g, 'and')
+          .replace(/[^a-zA-Z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '');
+
         const shape = new THREE.Shape();
         room.polygon.forEach((p, i) => {
           if (i === 0) shape.moveTo(p.x, -p.y);
@@ -286,17 +318,23 @@
         shape.closePath();
         const geo = new THREE.ShapeGeometry(shape);
         geo.rotateX(-Math.PI / 2);
+        geo.translate(-cx, 0, -cy);
+        geo.name = `${roomLabel}_Floor`;
         const mat = new THREE.MeshStandardMaterial({
           color: this.floorColorFor(room, style),
           roughness: room.type === 'bathroom' || room.type === 'kitchen' ? 0.55 : 0.82,
           metalness: 0,
         });
+        mat.name = `Floor_${roomLabel}`;
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.y = 0.006;
+        mesh.name = `${roomLabel}_Floor`;
+        mesh.position.set(cx, 0.006, cy);
         mesh.receiveShadow = true;
+        mesh.userData = { isFloor: true, roomId: room.id, roomLabel, cx, cy };
+        this.floorMeshes.push(mesh);
         this.world.add(mesh);
 
-        // Plank / tile joints for a more architectural floor
+        // Plank / tile joints for a more architectural floor (excluded from GLB export)
         if (room.area > 5 && this.app.plan.style !== 'urbanloft') {
           const bb = room.bounds;
           const lines = [];
@@ -316,6 +354,8 @@
             const g = new THREE.BufferGeometry();
             g.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
             const line = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.055 }));
+            line.name = `${roomLabel}_Floor_Joints`;
+            line.userData = { isWireframeLine: true, roomId: room.id };
             this.world.add(line);
           }
         }
@@ -324,14 +364,22 @@
 
     buildWalls(plan, segs, style, H) {
       const wallMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(style.wall), roughness: 0.95, metalness: 0 });
+      wallMat.name = 'Wall_Interior';
       const wallOutMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(style.wallOutside), roughness: 0.95, metalness: 0 });
+      wallOutMat.name = 'Wall_Exterior';
       // Darker section caps make the cutaway read like an architectural model.
       const capMat = new THREE.MeshStandardMaterial({
         color: blend(style.wallOutside, '#4a443a', 0.82),
         roughness: 0.9,
         metalness: 0,
       });
+      capMat.name = 'Wall_Section_Cap';
       this.wallMats = [wallMat, wallOutMat, capMat];
+      this.wallMeshes = [];
+      this.openingGroups = [];
+
+      let extCount = 0;
+      let intCount = 0;
 
       segs.forEach((seg) => {
         if (seg.len < 0.1 || (seg.wall && seg.wall.virtual)) return;
@@ -377,38 +425,44 @@
           shape.holes.push(hole);
         });
 
+        const isExt = !!seg.boundary;
+        const wallName = isExt ? `Exterior_Wall_${++extCount}` : `Interior_Wall_${++intCount}`;
         const geo = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: false, curveSegments: 1 });
         geo.translate(0, 0, -t / 2);
-        const mesh = new THREE.Mesh(geo, [seg.boundary ? wallOutMat : wallMat, capMat]);
+        geo.name = wallName;
+        const mesh = new THREE.Mesh(geo, [isExt ? wallOutMat : wallMat, capMat]);
+        mesh.name = wallName;
         mesh.position.set((seg.a.x + seg.b.x) / 2, 0, (seg.a.y + seg.b.y) / 2);
         mesh.rotation.y = -seg.angle;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
+        mesh.userData = { isWall: true, isExterior: isExt, segKey: seg.key, wallName };
+        this.wallMeshes.push(mesh);
         this.structure.add(mesh);
 
-        // fine architectural outline keeps wall tops and openings legible
+        // Fine architectural outline keeps wall tops and openings legible in live 3D view
         const edgeMat = new THREE.LineBasicMaterial({ color: 0x4c4841, transparent: true, opacity: 0.16 });
         const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 32), edgeMat);
+        edges.name = `${wallName}_Edges`;
         edges.position.copy(mesh.position);
         edges.rotation.copy(mesh.rotation);
+        edges.userData = { isWireframeLine: true };
         this.structure.add(edges);
 
-        // opening details
-        const details = new THREE.Group();
-        details.position.set((seg.a.x + seg.b.x) / 2, 0, (seg.a.y + seg.b.y) / 2);
-        details.rotation.y = -seg.angle;
-        this.structure.add(details);
+        // Opening details positioned directly at each opening's world center
         ops.forEach((pl) => {
-          this.buildOpeningDetail(details, pl, L, t, H, style);
+          const opGroup = this.buildOpeningDetail(this.structure, pl, L, t, H, style);
+          if (opGroup) this.openingGroups.push(opGroup);
         });
       });
     }
 
-    buildOpeningDetail(group, pl, L, t, H, style) {
+    buildOpeningDetail(parentGroup, pl, L, t, H, style) {
       const w = Math.min(pl.width, L - 0.12);
-      const cx = pl.offset - L / 2;
       const trimMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(style.dark), roughness: 0.72 });
+      trimMat.name = 'Opening_Trim';
       const woodMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(style.wood), roughness: 0.66 });
+      woodMat.name = 'Opening_Wood';
       const glassMat = new THREE.MeshPhysicalMaterial({
         color: new THREE.Color('#c2dce4'),
         transparent: true,
@@ -418,60 +472,87 @@
         side: THREE.DoubleSide,
         depthWrite: false,
       });
+      glassMat.name = 'Window_Glass';
       const frameD = t + 0.02;
+
+      let baseLabel = 'Single_Door';
+      if (pl.op.kind === 'window') {
+        baseLabel = 'Window';
+      } else if (pl.op.kind === 'opening') {
+        baseLabel = 'Passage';
+      } else if (pl.op.style === 'double') {
+        baseLabel = 'Double_Door';
+      } else if (pl.op.style === 'sliding') {
+        baseLabel = 'Sliding_Door';
+      } else if (pl.op.style === 'bifold') {
+        baseLabel = 'Bifold_Door';
+      }
+
+      const group = new THREE.Group();
+      group.name = baseLabel;
+      group.position.set(pl.x, 0, pl.y);
+      group.rotation.y = -pl.angle;
+      group.userData = {
+        isOpening: true,
+        openingKind: pl.op.kind,
+        openingStyle: pl.op.style || 'single',
+        openingId: pl.op.id,
+        baseLabel,
+      };
+      parentGroup.add(group);
+
+      const addPartMesh = (target, geo, mat, bx, by, bz, partName) => {
+        if (geo && partName) geo.name = partName;
+        const m = new THREE.Mesh(geo, mat || trimMat);
+        if (partName) {
+          m.name = partName;
+          m.userData = { partName };
+        }
+        m.position.set(bx || 0, by || 0, bz || 0);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        target.add(m);
+        return m;
+      };
+
+      const box = (bw, bh, bd, bx, by, bz, mat, partName) =>
+        addPartMesh(group, new THREE.BoxGeometry(bw, bh, bd), mat || trimMat, bx, by, bz, partName);
 
       if (pl.op.kind === 'window') {
         const sill = FC.clamp(pl.sill, 0.05, H - 0.2);
         const h = Math.max(0.15, Math.min(pl.height, H - sill - 0.04));
         const top = sill + h;
         const f = 0.045;
-        const box = (bw, bh, bd, bx, by, bz, mat) => {
-          const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), mat || trimMat);
-          m.position.set(bx, by, bz);
-          m.castShadow = true;
-          m.receiveShadow = true;
-          group.add(m);
-        };
-        box(w, f, frameD, cx, top, 0);
-        box(w, f, frameD, cx, sill, 0);
-        box(f, h, frameD, cx - w / 2 + f / 2, sill + h / 2, 0);
-        box(f, h, frameD, cx + w / 2 - f / 2, sill + h / 2, 0);
+        box(w, f, frameD, 0, top, 0, trimMat, 'Window_Frame_Top');
+        box(w, f, frameD, 0, sill, 0, trimMat, 'Window_Frame_Bottom');
+        box(f, h, frameD, -w / 2 + f / 2, sill + h / 2, 0, trimMat, 'Window_Frame_Left');
+        box(f, h, frameD, w / 2 - f / 2, sill + h / 2, 0, trimMat, 'Window_Frame_Right');
         const mullions = w > 1.6 ? 2 : 1;
         for (let i = 1; i <= mullions; i++) {
-          const x = cx - w / 2 + (w / (mullions + 1)) * i;
-          box(0.025, h - f * 2, frameD * 0.7, x, sill + h / 2, 0, trimMat);
+          const x = -w / 2 + (w / (mullions + 1)) * i;
+          box(0.025, h - f * 2, frameD * 0.7, x, sill + h / 2, 0, trimMat, mullions > 1 ? `Window_Mullion_${i}` : 'Window_Mullion');
         }
-        const glass = new THREE.Mesh(new THREE.PlaneGeometry(w - f * 2, h - f * 2), glassMat);
-        glass.position.set(cx, sill + h / 2, 0);
+        const glassGeo = new THREE.PlaneGeometry(w - f * 2, h - f * 2);
+        glassGeo.name = 'Window_Glass';
+        const glass = new THREE.Mesh(glassGeo, glassMat);
+        glass.name = 'Window_Glass';
+        glass.userData = { partName: 'Window_Glass' };
+        glass.position.set(0, sill + h / 2, 0);
         group.add(glass);
         // exterior sill board
-        box(w + 0.12, 0.04, t + 0.16, cx, sill - 0.035, 0, woodMat);
+        box(w + 0.12, 0.04, t + 0.16, 0, sill - 0.035, 0, woodMat, 'Window_Sill');
       } else if (pl.op.kind === 'opening') {
         const h = Math.min(pl.height, H - 0.05);
         const f = 0.035;
-        const box = (bw, bh, bd, bx, by) => {
-          const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), trimMat);
-          m.position.set(bx, by, 0);
-          m.castShadow = true;
-          m.receiveShadow = true;
-          group.add(m);
-        };
-        box(f, h, frameD, cx - w / 2 + f / 2, h / 2);
-        box(f, h, frameD, cx + w / 2 - f / 2, h / 2);
-        box(w, f, frameD, cx, h);
+        box(f, h, frameD, -w / 2 + f / 2, h / 2, 0, trimMat, 'Passage_Frame_Left');
+        box(f, h, frameD, w / 2 - f / 2, h / 2, 0, trimMat, 'Passage_Frame_Right');
+        box(w, f, frameD, 0, h, 0, trimMat, 'Passage_Frame_Top');
       } else {
         const h = Math.min(pl.height, H - 0.05);
         const f = 0.045;
-        const box = (bw, bh, bd, bx, by, bz, mat) => {
-          const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), mat);
-          m.position.set(bx, by, bz || 0);
-          m.castShadow = true;
-          m.receiveShadow = true;
-          group.add(m);
-        };
-        box(f, h, frameD, cx - w / 2 + f / 2, h / 2, 0, trimMat);
-        box(f, h, frameD, cx + w / 2 - f / 2, h / 2, 0, trimMat);
-        box(w, f, frameD, cx, h, 0, trimMat);
+        box(f, h, frameD, -w / 2 + f / 2, h / 2, 0, trimMat, 'Door_Frame_Left');
+        box(f, h, frameD, w / 2 - f / 2, h / 2, 0, trimMat, 'Door_Frame_Right');
+        box(w, f, frameD, 0, h, 0, trimMat, 'Door_Frame_Top');
 
         const swingSign = pl.op.swingSide === -1 ? -1 : 1;
 
@@ -479,99 +560,88 @@
           const panelW = w / 2 - 0.03;
           const panelH = h - 0.07;
           const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(style.linen), roughness: 0.7, transparent: true, opacity: 0.94 });
-          box(panelW, panelH, 0.035, cx - w / 4, panelH / 2 + 0.01, -0.025 * swingSign, mat);
-          box(panelW, panelH, 0.035, cx + w / 4, panelH / 2 + 0.01, 0.025 * swingSign, mat);
-          box(0.018, 0.4, 0.02, cx - 0.06, 1.05, 0.055 * swingSign, trimMat);
-          box(0.018, 0.4, 0.02, cx + 0.06, 1.05, -0.055 * swingSign, trimMat);
+          mat.name = 'Sliding_Door_Panel';
+          box(panelW, panelH, 0.035, -w / 4, panelH / 2 + 0.01, -0.025 * swingSign, mat, 'Sliding_Panel_Left');
+          box(panelW, panelH, 0.035, w / 4, panelH / 2 + 0.01, 0.025 * swingSign, mat, 'Sliding_Panel_Right');
+          box(0.018, 0.4, 0.02, -0.06, 1.05, 0.055 * swingSign, trimMat, 'Sliding_Handle_Left');
+          box(0.018, 0.4, 0.02, 0.06, 1.05, -0.055 * swingSign, trimMat, 'Sliding_Handle_Right');
         } else if (pl.op.style === 'bifold') {
           // Double bifold closet door: 4 folding leaves
           const leafW = (w - 0.08) / 4;
           const leafH = h - 0.06;
           const fold = 0.72;
 
-          box(w, 0.035, 0.035, cx, h - 0.02, 0, trimMat);
+          box(w, 0.035, 0.035, 0, h - 0.02, 0, trimMat, 'Bifold_Header_Track');
 
           const gL1 = new THREE.Group();
-          gL1.position.set(cx - w / 2 + 0.04, 0, 0);
+          gL1.name = 'Bifold_Hinge_Left_Inner';
+          gL1.userData = { partName: 'Bifold_Hinge_Left_Inner' };
+          gL1.position.set(-w / 2 + 0.04, 0, 0);
           gL1.rotation.y = fold * swingSign;
-          const mL1 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
-          mL1.position.set(leafW / 2, leafH / 2 + 0.02, 0);
-          mL1.castShadow = true;
-          gL1.add(mL1);
+          addPartMesh(gL1, new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat, leafW / 2, leafH / 2 + 0.02, 0, 'Bifold_Leaf_Left_1');
 
           const gL2 = new THREE.Group();
+          gL2.name = 'Bifold_Hinge_Left_Outer';
+          gL2.userData = { partName: 'Bifold_Hinge_Left_Outer' };
           gL2.position.set(leafW, 0, 0);
           gL2.rotation.y = -fold * 2 * swingSign;
-          const mL2 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
-          mL2.position.set(leafW / 2, leafH / 2 + 0.02, 0);
-          mL2.castShadow = true;
-          gL2.add(mL2);
-
-          const handleL = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.16, 8), trimMat);
-          handleL.position.set(leafW - 0.04, 1.05, 0.028 * swingSign);
-          gL2.add(handleL);
+          addPartMesh(gL2, new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat, leafW / 2, leafH / 2 + 0.02, 0, 'Bifold_Leaf_Left_2');
+          addPartMesh(gL2, new THREE.CylinderGeometry(0.012, 0.012, 0.16, 8), trimMat, leafW - 0.04, 1.05, 0.028 * swingSign, 'Bifold_Handle_Left');
           gL1.add(gL2);
           group.add(gL1);
 
           const gR1 = new THREE.Group();
-          gR1.position.set(cx + w / 2 - 0.04, 0, 0);
+          gR1.name = 'Bifold_Hinge_Right_Inner';
+          gR1.userData = { partName: 'Bifold_Hinge_Right_Inner' };
+          gR1.position.set(w / 2 - 0.04, 0, 0);
           gR1.rotation.y = -fold * swingSign;
-          const mR1 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
-          mR1.position.set(-leafW / 2, leafH / 2 + 0.02, 0);
-          mR1.castShadow = true;
-          gR1.add(mR1);
+          addPartMesh(gR1, new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat, -leafW / 2, leafH / 2 + 0.02, 0, 'Bifold_Leaf_Right_1');
 
           const gR2 = new THREE.Group();
+          gR2.name = 'Bifold_Hinge_Right_Outer';
+          gR2.userData = { partName: 'Bifold_Hinge_Right_Outer' };
           gR2.position.set(-leafW, 0, 0);
           gR2.rotation.y = fold * 2 * swingSign;
-          const mR2 = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat);
-          mR2.position.set(-leafW / 2, leafH / 2 + 0.02, 0);
-          mR2.castShadow = true;
-          gR2.add(mR2);
-
-          const handleR = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.16, 8), trimMat);
-          handleR.position.set(-leafW + 0.04, 1.05, 0.028 * swingSign);
-          gR2.add(handleR);
+          addPartMesh(gR2, new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat, -leafW / 2, leafH / 2 + 0.02, 0, 'Bifold_Leaf_Right_2');
+          addPartMesh(gR2, new THREE.CylinderGeometry(0.012, 0.012, 0.16, 8), trimMat, -leafW + 0.04, 1.05, 0.028 * swingSign, 'Bifold_Handle_Right');
           gR1.add(gR2);
           group.add(gR1);
         } else {
           const leaves = pl.op.style === 'double' ? 2 : 1;
           const leafW = (w - 0.08) / leaves;
           const leafH = h - 0.06;
+          const insetMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(style.cabinet), roughness: 0.72 });
+          insetMat.name = 'Door_Panel_Inset';
           for (let i = 0; i < leaves; i++) {
             let side = i === 0 ? 1 : -1;
             if (leaves === 1) {
               side = pl.op.hinge === 'right' ? -1 : 1;
             }
-            const hingeX = side > 0 ? cx - w / 2 + 0.04 : cx + w / 2 - 0.04;
+            const leafTag = leaves > 1 ? (i === 0 ? '_Left' : '_Right') : '';
+            const hingeX = side > 0 ? -w / 2 + 0.04 : w / 2 - 0.04;
             const hinge = new THREE.Group();
+            hinge.name = `Door_Hinge${leafTag}`;
+            hinge.userData = { partName: `Door_Hinge${leafTag}` };
             hinge.position.set(hingeX, 0, 0);
             hinge.rotation.y = side * swingSign * 0.82;
-            const leaf = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.042), woodMat);
-            leaf.position.set((side > 0 ? 1 : -1) * leafW / 2, leafH / 2 + 0.02, 0);
-            leaf.castShadow = true;
-            leaf.receiveShadow = true;
-            hinge.add(leaf);
-            // panel inset
-            const inset = new THREE.Mesh(
-              new THREE.BoxGeometry(leafW - 0.14, leafH - 0.28, 0.008),
-              new THREE.MeshStandardMaterial({ color: new THREE.Color(style.cabinet), roughness: 0.72 })
-            );
-            inset.position.set((side > 0 ? 1 : -1) * leafW / 2, leafH / 2 + 0.02, 0.024 * swingSign);
-            hinge.add(inset);
-            const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), trimMat);
-            knob.position.set((side > 0 ? 1 : -1) * (leafW - 0.1), 1.02, 0.05 * swingSign);
-            hinge.add(knob);
+            addPartMesh(hinge, new THREE.BoxGeometry(leafW, leafH, 0.042), woodMat, (side > 0 ? 1 : -1) * leafW / 2, leafH / 2 + 0.02, 0, `Door_Leaf${leafTag}`);
+            addPartMesh(hinge, new THREE.BoxGeometry(leafW - 0.14, leafH - 0.28, 0.008), insetMat, (side > 0 ? 1 : -1) * leafW / 2, leafH / 2 + 0.02, 0.024 * swingSign, `Door_Panel_Inset${leafTag}`);
+            addPartMesh(hinge, new THREE.SphereGeometry(0.035, 10, 8), trimMat, (side > 0 ? 1 : -1) * (leafW - 0.1), 1.02, 0.05 * swingSign, `Door_Knob${leafTag}`);
             group.add(hinge);
           }
         }
         // threshold
-        box(w + 0.04, 0.02, t + 0.04, cx, 0.01, 0, trimMat);
+        box(w + 0.04, 0.02, t + 0.04, 0, 0.01, 0, trimMat, 'Door_Threshold');
       }
+      return group;
     }
 
     buildFurniture(plan, items, style, H) {
-      const group = new THREE.Group();
+      if (!this.furnitureGroup) {
+        this.furnitureGroup = new THREE.Group();
+        this.furnitureGroup.name = 'Furniture';
+        this.world.add(this.furnitureGroup);
+      }
       this.furnitureMeshes = new Map();
       items.forEach((item) => {
         try {
@@ -579,6 +649,8 @@
           g.userData = Object.assign(g.userData || {}, {
             isFurniture: true,
             furnitureId: item.id,
+            furnitureKind: item.kind,
+            roomId: item.roomId || null,
           });
           if (typeof g.traverse === 'function') {
             g.traverse((node) => {
@@ -588,13 +660,11 @@
             });
           }
           this.furnitureMeshes.set(item.id, g);
-          group.add(g);
+          this.furnitureGroup.add(g);
         } catch (err) {
           /* Keep the house usable even if one item fails */
         }
       });
-      this.furnitureGroup = group;
-      this.world.add(group);
     }
 
     syncFurnitureTransform(item) {
@@ -634,6 +704,7 @@
       if (!item) return;
 
       const gizmo = new THREE.Group();
+      gizmo.name = 'Selection_Gizmo';
       gizmo.userData = { isGizmo: true, furnitureId: item.id };
       gizmo.position.set(item.x, 0.005, item.y);
       gizmo.rotation.y = -(item.rot || 0);
@@ -716,13 +787,22 @@
 
     buildCeiling(plan, rooms, style, H) {
       const group = new THREE.Group();
+      group.name = 'Ceilings';
       const mat = new THREE.MeshStandardMaterial({
         color: new THREE.Color(style.wall),
         roughness: 0.95,
         side: THREE.DoubleSide,
       });
-      rooms.forEach((room) => {
+      mat.name = 'Ceiling_Plaster';
+      this.ceilingMeshes = [];
+      rooms.forEach((room, idx) => {
         if (!room.polygon || room.polygon.length < 3) return;
+        const cx = (room.centroid && room.centroid.x) || 0;
+        const cy = (room.centroid && room.centroid.y) || 0;
+        const roomLabel = String(room.name || (FC.roomTypes[room.type] && FC.roomTypes[room.type].label) || ('Room_' + (idx + 1)))
+          .replace(/&/g, 'and')
+          .replace(/[^a-zA-Z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '');
         const shape = new THREE.Shape();
         room.polygon.forEach((p, i) => {
           if (i === 0) shape.moveTo(p.x, -p.y);
@@ -731,9 +811,14 @@
         shape.closePath();
         const geo = new THREE.ShapeGeometry(shape);
         geo.rotateX(-Math.PI / 2);
+        geo.translate(-cx, 0, -cy);
+        geo.name = `${roomLabel}_Ceiling`;
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.y = H - 0.01;
+        mesh.name = `${roomLabel}_Ceiling`;
+        mesh.position.set(cx, H - 0.01, cy);
         mesh.receiveShadow = true;
+        mesh.userData = { isCeiling: true, roomId: room.id, roomLabel, cx, cy };
+        this.ceilingMeshes.push(mesh);
         group.add(mesh);
       });
       this.ceilingGroup = group;
@@ -745,46 +830,73 @@
         disposeObject(this.userLightsGroup);
       }
       this.userLightsGroup = new THREE.Group();
+      this.userLightsGroup.name = 'Lighting';
       this.world.add(this.userLightsGroup);
+      this.lightFixtureGroups = [];
 
       const lights = plan.lights || [];
-      lights.forEach((l) => {
+      lights.forEach((l, idx) => {
         const col = new THREE.Color(l.color || '#fff1de');
         const intensity = (l.intensity != null ? l.intensity : 1.0) * 1.8;
         const dist = (l.range || 6.0) * 1.2;
 
         const pLight = new THREE.PointLight(col, intensity, dist, 2);
+        pLight.name = `Point_Light_${idx + 1}`;
         pLight.position.set(l.x, l.z || 2.4, l.y);
         pLight.castShadow = true;
         pLight.shadow.bias = -0.002;
         pLight.shadow.mapSize.set(512, 512);
         this.userLightsGroup.add(pLight);
 
+        const typeLabel = l.type === 'pendant' ? 'Pendant_Fixture' : (l.type === 'lamp' ? 'Floor_Lamp_Fixture' : (l.type === 'spot' ? 'Spot_Light_Fixture' : 'Ceiling_Light_Fixture'));
+
         // Fixture mesh (glow bulb and casing)
         const fixGroup = new THREE.Group();
+        fixGroup.name = typeLabel;
         fixGroup.position.copy(pLight.position);
+        fixGroup.userData = {
+          isLightFixture: true,
+          lightType: l.type || 'ceiling',
+          baseLabel: typeLabel,
+          x: l.x,
+          y: l.y,
+          z: l.z || 2.4,
+        };
 
         const bulbGeo = new THREE.SphereGeometry(0.08, 12, 12);
+        bulbGeo.name = 'Light_Bulb';
         const bulbMat = new THREE.MeshBasicMaterial({ color: col });
+        bulbMat.name = 'Light_Bulb_Glow';
         const bulbMesh = new THREE.Mesh(bulbGeo, bulbMat);
+        bulbMesh.name = 'Light_Bulb';
+        bulbMesh.userData = { partName: 'Light_Bulb' };
         fixGroup.add(bulbMesh);
 
         if (l.type === 'pendant') {
           const H = (plan.settings && plan.settings.wallHeight) || 2.7;
           const cordLen = Math.max(0.15, H - (l.z || 2.4));
           const cordGeo = new THREE.CylinderGeometry(0.012, 0.012, cordLen);
+          cordGeo.name = 'Pendant_Cord';
           const cordMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+          cordMat.name = 'Fixture_Cord';
           const cord = new THREE.Mesh(cordGeo, cordMat);
+          cord.name = 'Pendant_Cord';
+          cord.userData = { partName: 'Pendant_Cord' };
           cord.position.y = cordLen / 2;
           fixGroup.add(cord);
         } else if (l.type === 'lamp') {
           const poleGeo = new THREE.CylinderGeometry(0.018, 0.018, l.z || 1.6);
+          poleGeo.name = 'Lamp_Stand_Pole';
           const poleMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b });
+          poleMat.name = 'Fixture_Stand_Metal';
           const pole = new THREE.Mesh(poleGeo, poleMat);
+          pole.name = 'Lamp_Stand_Pole';
+          pole.userData = { partName: 'Lamp_Stand_Pole' };
           pole.position.y = -(l.z || 1.6) / 2;
           fixGroup.add(pole);
         }
 
+        this.lightFixtureGroups.push(fixGroup);
         this.userLightsGroup.add(fixGroup);
       });
     }
@@ -836,30 +948,349 @@
         return Promise.reject(new Error('GLTFExporter is not loaded.'));
       }
       const exporter = new window.THREE.GLTFExporter();
+      exporter.register(() => ({
+        writeMesh(mesh, meshDef) {
+          if (mesh && mesh.name) {
+            meshDef.name = String(mesh.name);
+          } else if (mesh && mesh.geometry && mesh.geometry.name) {
+            meshDef.name = String(mesh.geometry.name);
+          }
+        },
+      }));
 
-      // Ensure furniture is full scale (not collapsed by 2D/3D transition animation)
+      // Ensure structure and furniture are full scale (not collapsed by 2D/3D transition animation)
+      const oldStructScaleY = this.structure ? this.structure.scale.y : 1;
       const oldFurnScaleY = this.furnitureGroup ? this.furnitureGroup.scale.y : 1;
       const oldFurnPosY = this.furnitureGroup ? this.furnitureGroup.position.y : 0;
+      if (this.structure) this.structure.scale.set(1, 1, 1);
       if (this.furnitureGroup) {
         this.furnitureGroup.scale.set(1, 1, 1);
         this.furnitureGroup.position.set(0, 0, 0);
       }
       this.world.updateMatrixWorld(true);
 
-      const exportScene = new THREE.Scene();
-      exportScene.name = (this.app.plan && this.app.plan.name) || 'FloorPlan';
+      const sanitizeName = (str, fallback = 'Object') => {
+        const cleaned = String(str || fallback)
+          .replace(/&/g, 'and')
+          .replace(/[^a-zA-Z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .split('_')
+          .filter(Boolean)
+          .map((w) => (w.toLowerCase() === 'and' ? 'and' : w.charAt(0).toUpperCase() + w.slice(1)))
+          .join('_');
+        return cleaned || fallback;
+      };
 
-      for (const child of this.world.children) {
-        if (child === this.ground || child === this.grid || child.isGridHelper) continue;
-        if (child === this.selectionGizmo || (child.userData && child.userData.isGizmo)) continue;
-        if (child.isLight) continue;
-        exportScene.add(child.clone(true));
+      const usedNames = new Set();
+      const nameCounters = new Map();
+      const claimUniqueName = (base, alwaysNumber = false) => {
+        const clean = sanitizeName(base);
+        const nextCount = (nameCounters.get(clean) || 0) + 1;
+        nameCounters.set(clean, nextCount);
+        if (!alwaysNumber && !usedNames.has(clean) && nextCount === 1) {
+          usedNames.add(clean);
+          return clean;
+        }
+        let idx = nextCount;
+        let candidate = `${clean}_${idx}`;
+        while (usedNames.has(candidate)) {
+          idx += 1;
+          candidate = `${clean}_${idx}`;
+        }
+        usedNames.add(candidate);
+        return candidate;
+      };
+
+      const mergeRootAndPartName = (rootName, partName) => {
+        const cleanPart = sanitizeName(partName);
+        const rootWords = rootName.replace(/_\d+$/, '').split('_').filter(Boolean);
+        const partWords = cleanPart.split('_').filter(Boolean);
+        if (partWords.length > 1 && rootWords.length > 0) {
+          const firstPartWord = partWords[0].toLowerCase();
+          const hasOverlap = rootWords.some((rw) => rw.toLowerCase() === firstPartWord);
+          if (hasOverlap) {
+            return `${rootName}_${partWords.slice(1).join('_')}`;
+          }
+        }
+        return `${rootName}_${cleanPart}`;
+      };
+
+      const cloneCleanTree = (sourceObj, rootName, prefixPartsWithRoot = false) => {
+        const clone = sourceObj.clone(true);
+        const assignedRoot = claimUniqueName(rootName);
+        clone.name = assignedRoot;
+        if (clone.isMesh && clone.geometry) {
+          clone.geometry = clone.geometry.clone();
+          clone.geometry.name = assignedRoot;
+        }
+        const toRemove = [];
+        clone.traverse((node) => {
+          if (node === clone) return;
+          if (node.isLine || node.isLineSegments || (node.userData && node.userData.isWireframeLine)) {
+            toRemove.push(node);
+            return;
+          }
+          const rawPart = (node.userData && node.userData.partName) || node.name || (node.isMesh ? 'Part' : 'Group');
+          const desired = prefixPartsWithRoot ? mergeRootAndPartName(assignedRoot, rawPart) : sanitizeName(rawPart);
+          const uniquePart = claimUniqueName(desired);
+          node.name = uniquePart;
+          if (node.isMesh && node.geometry) {
+            node.geometry = node.geometry.clone();
+            node.geometry.name = uniquePart;
+          }
+        });
+        toRemove.forEach((n) => {
+          if (n.parent) n.parent.remove(n);
+        });
+        return clone;
+      };
+
+      const exportScene = new THREE.Scene();
+      exportScene.name = sanitizeName((this.app.plan && this.app.plan.name) || 'FloorPlan', 'FloorPlan');
+      usedNames.add(exportScene.name);
+
+      /* -------------------------------------------------------------- */
+      /* 1. Architecture Hierarchy                                      */
+      /* -------------------------------------------------------------- */
+      const archGroup = new THREE.Group();
+      archGroup.name = claimUniqueName('Architecture');
+      exportScene.add(archGroup);
+
+      // 1a. Foundation Slab
+      if (this.slabMesh) {
+        const slabClone = cloneCleanTree(this.slabMesh, 'Foundation_Slab');
+        archGroup.add(slabClone);
       }
 
+      // 1b. Walls (Exterior_Walls & Interior_Walls)
+      const wallsRoot = new THREE.Group();
+      wallsRoot.name = claimUniqueName('Walls');
+      const extWallsGroup = new THREE.Group();
+      extWallsGroup.name = claimUniqueName('Exterior_Walls');
+      const intWallsGroup = new THREE.Group();
+      intWallsGroup.name = claimUniqueName('Interior_Walls');
+
+      (this.wallMeshes || []).forEach((wMesh) => {
+        const isExt = !!(wMesh.userData && wMesh.userData.isExterior);
+        const wName = (wMesh.userData && wMesh.userData.wallName) || wMesh.name || (isExt ? 'Exterior_Wall' : 'Interior_Wall');
+        const wClone = cloneCleanTree(wMesh, wName);
+        if (isExt) extWallsGroup.add(wClone);
+        else intWallsGroup.add(wClone);
+      });
+
+      if (extWallsGroup.children.length > 0) wallsRoot.add(extWallsGroup);
+      if (intWallsGroup.children.length > 0) wallsRoot.add(intWallsGroup);
+      if (wallsRoot.children.length > 0) archGroup.add(wallsRoot);
+
+      // 1c. Openings (Doors, Windows, Passages)
+      if (this.openingGroups && this.openingGroups.length > 0) {
+        const openingsRoot = new THREE.Group();
+        openingsRoot.name = claimUniqueName('Openings');
+        const doorsGroup = new THREE.Group();
+        doorsGroup.name = claimUniqueName('Doors');
+        const windowsGroup = new THREE.Group();
+        windowsGroup.name = claimUniqueName('Windows');
+        const passagesGroup = new THREE.Group();
+        passagesGroup.name = claimUniqueName('Passages');
+
+        const opTypeCounts = new Map();
+        this.openingGroups.forEach((opGrp) => {
+          const kind = (opGrp.userData && opGrp.userData.openingKind) || 'door';
+          const base = (opGrp.userData && opGrp.userData.baseLabel) || opGrp.name || 'Opening';
+          const num = (opTypeCounts.get(base) || 0) + 1;
+          opTypeCounts.set(base, num);
+          const numberedBase = `${base}_${num}`;
+          const opClone = cloneCleanTree(opGrp, numberedBase, true);
+
+          if (kind === 'window') windowsGroup.add(opClone);
+          else if (kind === 'opening') passagesGroup.add(opClone);
+          else doorsGroup.add(opClone);
+        });
+
+        if (doorsGroup.children.length > 0) openingsRoot.add(doorsGroup);
+        if (windowsGroup.children.length > 0) openingsRoot.add(windowsGroup);
+        if (passagesGroup.children.length > 0) openingsRoot.add(passagesGroup);
+        if (openingsRoot.children.length > 0) archGroup.add(openingsRoot);
+      }
+
+      /* -------------------------------------------------------------- */
+      /* 2. Rooms Hierarchy (Floor, Ceiling, Furniture by Type, Lights) */
+      /* -------------------------------------------------------------- */
+      const roomsRoot = new THREE.Group();
+      roomsRoot.name = claimUniqueName('Rooms');
+      exportScene.add(roomsRoot);
+
+      const rooms = this.app.rooms || [];
+      const roomEntries = new Map();
+
+      rooms.forEach((room, idx) => {
+        const rawName = room.name || (FC.roomTypes[room.type] && FC.roomTypes[room.type].label) || `Room_${idx + 1}`;
+        const roomFolderName = claimUniqueName(rawName);
+        const rcx = (room.centroid && room.centroid.x) || 0;
+        const rcy = (room.centroid && room.centroid.y) || 0;
+
+        const roomGroup = new THREE.Group();
+        roomGroup.name = roomFolderName;
+        roomGroup.position.set(rcx, 0, rcy);
+        roomsRoot.add(roomGroup);
+
+        roomEntries.set(room.id, {
+          room,
+          roomGroup,
+          roomFolderName,
+          rcx,
+          rcy,
+          furnitureRoot: null,
+          categoryGroups: new Map(),
+          lightingGroup: null,
+        });
+      });
+
+      const getOrCreateUnassignedRoom = () => {
+        if (roomEntries.has('__unassigned__')) return roomEntries.get('__unassigned__');
+        const b = FC.planBounds(this.app.plan);
+        const roomFolderName = claimUniqueName('Unassigned_Area');
+        const roomGroup = new THREE.Group();
+        roomGroup.name = roomFolderName;
+        roomGroup.position.set(b.cx, 0, b.cy);
+        roomsRoot.add(roomGroup);
+        const entry = {
+          room: null,
+          roomGroup,
+          roomFolderName,
+          rcx: b.cx,
+          rcy: b.cy,
+          furnitureRoot: null,
+          categoryGroups: new Map(),
+          lightingGroup: null,
+        };
+        roomEntries.set('__unassigned__', entry);
+        return entry;
+      };
+
+      const findRoomEntryForPoint = (roomId, x, y) => {
+        if (roomId && roomEntries.has(roomId)) {
+          return roomEntries.get(roomId);
+        }
+        if (FC.pointInPolygon) {
+          for (let i = 0; i < rooms.length; i++) {
+            const r = rooms[i];
+            if (r.polygon && r.polygon.length >= 3 && FC.pointInPolygon({ x, y }, r.polygon)) {
+              return roomEntries.get(r.id);
+            }
+          }
+        }
+        if (rooms.length > 0) {
+          let best = null;
+          let bestDist = Infinity;
+          rooms.forEach((r) => {
+            if (!r.centroid) return;
+            const d = Math.hypot(x - r.centroid.x, y - r.centroid.y);
+            if (d < bestDist) {
+              bestDist = d;
+              best = roomEntries.get(r.id);
+            }
+          });
+          if (best && bestDist < 12) return best;
+        }
+        return getOrCreateUnassignedRoom();
+      };
+
+      // 2a. Attach Floor Meshes to each Room Empty
+      (this.floorMeshes || []).forEach((fMesh) => {
+        const rId = fMesh.userData && fMesh.userData.roomId;
+        const entry = (rId && roomEntries.get(rId)) || getOrCreateUnassignedRoom();
+        const floorClone = cloneCleanTree(fMesh, `${entry.roomFolderName}_Floor`);
+        floorClone.position.set(fMesh.position.x - entry.rcx, fMesh.position.y, fMesh.position.z - entry.rcy);
+        entry.roomGroup.add(floorClone);
+      });
+
+      // 2b. Attach Ceiling Meshes to each Room Empty (if ceiling is enabled)
+      (this.ceilingMeshes || []).forEach((cMesh) => {
+        const rId = cMesh.userData && cMesh.userData.roomId;
+        const entry = (rId && roomEntries.get(rId)) || getOrCreateUnassignedRoom();
+        const ceilClone = cloneCleanTree(cMesh, `${entry.roomFolderName}_Ceiling`);
+        ceilClone.position.set(cMesh.position.x - entry.rcx, cMesh.position.y, cMesh.position.z - entry.rcy);
+        entry.roomGroup.add(ceilClone);
+      });
+
+      // 2c. Attach Furniture grouped by Furniture Category inside each Room Empty
+      if (this.app.plan && this.app.plan.furnished && this.furnitureMeshes) {
+        const items = this.app.furniture || [];
+        // Pre-count furniture labels so singletons stay clean and multiples get _1, _2...
+        const labelTotals = new Map();
+        items.forEach((item) => {
+          const lbl = FC.getFurnitureLabel ? FC.getFurnitureLabel(item) : sanitizeName(item.kind || 'Furniture');
+          labelTotals.set(lbl, (labelTotals.get(lbl) || 0) + 1);
+        });
+        const labelSeen = new Map();
+
+        items.forEach((item) => {
+          const g = this.furnitureMeshes.get(item.id);
+          if (!g) return;
+          const entry = findRoomEntryForPoint(item.roomId, item.x, item.y);
+          if (!entry.furnitureRoot) {
+            const fRoot = new THREE.Group();
+            fRoot.name = claimUniqueName(`${entry.roomFolderName}_Furniture`);
+            entry.furnitureRoot = fRoot;
+            entry.roomGroup.add(fRoot);
+          }
+
+          const catKey = FC.getFurnitureExportCategory
+            ? FC.getFurnitureExportCategory(item.kind)
+            : 'Other_Furniture';
+          let catGroup = entry.categoryGroups.get(catKey);
+          if (!catGroup) {
+            catGroup = new THREE.Group();
+            catGroup.name = claimUniqueName(`${entry.roomFolderName}_${catKey}`);
+            entry.categoryGroups.set(catKey, catGroup);
+            entry.furnitureRoot.add(catGroup);
+          }
+
+          const baseLabel = FC.getFurnitureLabel ? FC.getFurnitureLabel(item) : sanitizeName(item.kind || 'Furniture');
+          const count = (labelSeen.get(baseLabel) || 0) + 1;
+          labelSeen.set(baseLabel, count);
+          const itemDesiredName = (labelTotals.get(baseLabel) || 1) > 1 ? `${baseLabel}_${count}` : baseLabel;
+
+          const itemClone = cloneCleanTree(g, itemDesiredName, true);
+          itemClone.position.set(g.position.x - entry.rcx, g.position.y, g.position.z - entry.rcy);
+          catGroup.add(itemClone);
+        });
+      }
+
+      // 2d. Attach Light Fixtures inside each Room Empty
+      if (this.lightFixtureGroups && this.lightFixtureGroups.length > 0) {
+        const lightCounts = new Map();
+        this.lightFixtureGroups.forEach((fixGrp) => {
+          const lx = (fixGrp.userData && fixGrp.userData.x) || fixGrp.position.x;
+          const ly = (fixGrp.userData && fixGrp.userData.y) || fixGrp.position.z;
+          const entry = findRoomEntryForPoint(null, lx, ly);
+          if (!entry.lightingGroup) {
+            const lGroup = new THREE.Group();
+            lGroup.name = claimUniqueName(`${entry.roomFolderName}_Lighting`);
+            entry.lightingGroup = lGroup;
+            entry.roomGroup.add(lGroup);
+          }
+          const base = (fixGrp.userData && fixGrp.userData.baseLabel) || fixGrp.name || 'Light_Fixture';
+          const num = (lightCounts.get(base) || 0) + 1;
+          lightCounts.set(base, num);
+          const fixClone = cloneCleanTree(fixGrp, `${base}_${num}`, true);
+          fixClone.position.set(fixGrp.position.x - entry.rcx, fixGrp.position.y, fixGrp.position.z - entry.rcy);
+          entry.lightingGroup.add(fixClone);
+        });
+      }
+
+      exportScene.updateMatrixWorld(true);
+
+      // Restore live scene transition state
+      if (this.structure) {
+        this.structure.scale.y = oldStructScaleY;
+      }
       if (this.furnitureGroup) {
         this.furnitureGroup.scale.y = oldFurnScaleY;
         this.furnitureGroup.position.y = oldFurnPosY;
       }
+      this.world.updateMatrixWorld(true);
 
       return new Promise((resolve, reject) => {
         exporter.parse(
@@ -872,7 +1303,7 @@
             }
           },
           (err) => reject(err),
-          { binary: true }
+          { binary: true, trs: true }
         );
       });
     }
