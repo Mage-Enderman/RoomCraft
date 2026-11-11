@@ -2020,7 +2020,7 @@
             <div><span class="eyebrow">${esc(opts.eyebrow || 'RoomCraft')}</span><h2>${esc(opts.title)}</h2></div>
             <button class="icon-btn soft modal-x" aria-label="Close">${I('close')}</button>
           </div>
-          ${opts.input ? `<label class="modal-input"><span>${esc(opts.inputLabel || 'Name')}</span><input type="text" value="${esc(opts.input)}" maxlength="60"></label>` : ''}
+          ${opts.input ? `<label class="modal-input"><span>${esc(opts.inputLabel || 'Name')}</span><input class="modal-prompt" type="text" value="${esc(opts.input)}" maxlength="60"></label>` : ''}
           ${opts.html || (opts.message ? `<p class="modal-message">${esc(opts.message)}</p>` : '')}
           <div class="modal-actions">
             ${(opts.actions || [{ label: 'Close', value: null }])
@@ -2038,7 +2038,7 @@
             console.error('Modal onMount error:', e);
           }
         }
-        const input = overlay.querySelector('input[type="text"]');
+        const input = opts.input !== undefined ? overlay.querySelector('input.modal-prompt') : null;
         if (input) {
           setTimeout(() => {
             input.focus();
@@ -2059,7 +2059,8 @@
           btn.addEventListener('click', () => {
             const idx = parseInt(btn.dataset.i, 10);
             const action = (opts.actions || [{ label: 'Close', value: null }])[idx];
-            close(input ? input.value.trim() : action.value);
+            const value = input ? input.value.trim() : typeof action.value === 'function' ? action.value(overlay) : action.value;
+            close(value);
           });
         });
         if (input) {

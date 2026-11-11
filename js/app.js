@@ -2786,7 +2786,16 @@
         html,
         actions: [
           { label: 'Cancel', value: null },
-          { label: 'Import Plan', primary: true, value: 'import' },
+          {
+            label: 'Import Plan',
+            primary: true,
+            value: (overlay) => ({
+              factor: parseFloat((overlay.querySelector('input[name="cadUnit"]:checked') || {}).value || analysis.unitFactor || 0.0254),
+              mergeDouble: overlay.querySelector('#cadMergeDouble') ? overlay.querySelector('#cadMergeDouble').checked : true,
+              importDoors: overlay.querySelector('#cadImportDoors') ? overlay.querySelector('#cadImportDoors').checked : true,
+              filterOutliers: overlay.querySelector('#cadFilterOutliers') ? overlay.querySelector('#cadFilterOutliers').checked : true,
+            }),
+          },
         ],
         onMount: (overlay) => {
           const dimsSpan = overlay.querySelector('#cadResultDims');
@@ -2799,11 +2808,10 @@
         },
       }).then((result) => {
         if (!result) return;
-        const selRadio = document.querySelector('input[name="cadUnit"]:checked');
-        const factor = selRadio ? parseFloat(selRadio.value) : (analysis.unitFactor || 0.0254);
-        const mergeDouble = document.getElementById('cadMergeDouble') ? document.getElementById('cadMergeDouble').checked : true;
-        const importDoors = document.getElementById('cadImportDoors') ? document.getElementById('cadImportDoors').checked : true;
-        const filterOutliers = document.getElementById('cadFilterOutliers') ? document.getElementById('cadFilterOutliers').checked : true;
+        const factor = result.factor || analysis.unitFactor || 0.0254;
+        const mergeDouble = result.mergeDouble;
+        const importDoors = result.importDoors;
+        const filterOutliers = result.filterOutliers;
 
         try {
           const importedPlan = FC.CAD.importDXF(text, {
@@ -2879,7 +2887,7 @@
         html,
         actions: [
           { label: 'Cancel', value: null },
-          { label: 'Apply Scale', primary: true, value: 'apply' },
+          { label: 'Apply Scale', primary: true, value: (overlay) => ({ factor: parseFloat(overlay.querySelector('#customScaleInput').value) }) },
         ],
         onMount: (overlay, close) => {
           const targetInput = overlay.querySelector('#targetWidthInput');
@@ -2901,16 +2909,16 @@
         },
       }).then((res) => {
         if (!res) return;
-        let factor = 1;
-        if (typeof res === 'object' && res.factor) {
-          factor = res.factor;
-        } else {
-          const customInput = document.getElementById('customScaleInput');
-          factor = customInput ? parseFloat(customInput.value) : 1;
+        const factor = typeof res === 'object' && res.factor ? res.factor : parseFloat(res);
+        if (!(factor > 0) || !isFinite(factor)) {
+          this.toast('Enter a target width or a scale factor above 0.', 'warning');
+          return;
         }
-        if (factor && factor > 0 && factor !== 1) {
-          this.scalePlan(factor);
+        if (factor === 1) {
+          this.toast('The plan is already at that size.', 'info');
+          return;
         }
+        this.scalePlan(factor);
       });
     }
 
