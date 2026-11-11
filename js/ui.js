@@ -632,8 +632,8 @@
           ${parallelCandidate ? `<div class="tip" style="margin-top:8px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.28);border-radius:8px;padding:8px 10px;">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
               <div>
-                <b style="color:var(--ink-1);display:block;font-size:12px;">Parallel line detected</b>
-                <span style="font-size:11px;color:var(--ink-3);">${fmtThick(parallelCandidate.thicknessCm / 100)} separation (double wall)</span>
+                <b style="color:var(--text);display:block;font-size:12px;">Parallel line detected</b>
+                <span style="font-size:11px;color:var(--muted);">${fmtThick(parallelCandidate.thicknessCm / 100)} separation (double wall)</span>
               </div>
               <button class="btn primary sm" data-action="merge-parallel-wall" data-wall="${seg.id}" data-target="${parallelCandidate.wall.id}">Merge into 1</button>
             </div>
@@ -642,8 +642,8 @@
             <label class="num-field"><span>Resize length</span><span class="num-wrap"><input type="text" inputmode="text" data-wall-len="${seg.id}" data-min="0.5" data-max="30" data-step="0.05" value="${fmtInput(seg.len)}"><em>${inUnit()}</em></span></label>
           </div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:6px;">
-            <span style="font-size:11px;color:var(--ink-3);">Fixed anchor</span>
-            <select data-action="set-wall-anchor" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink-1);">
+            <span style="font-size:11px;color:var(--muted);">Fixed anchor</span>
+            <select data-action="set-wall-anchor" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--line-strong);background:var(--panel-2);color:var(--text);">
               <option value="0" ${ (this.app.wallAnchorEnd !== undefined ? this.app.wallAnchorEnd : 0) === 0 ? 'selected' : '' }>End A (Start fixed)</option>
               <option value="1" ${ (this.app.wallAnchorEnd !== undefined ? this.app.wallAnchorEnd : 0) === 1 ? 'selected' : '' }>End B (Finish fixed)</option>
               <option value="2" ${ (this.app.wallAnchorEnd !== undefined ? this.app.wallAnchorEnd : 0) === 2 ? 'selected' : '' }>Center</option>
@@ -902,7 +902,7 @@
           <div><b>${walls}</b><span>walls</span></div>
         </div>
         <div class="hint-note">${I('info')} Walls snap to corners, midpoints, and alignment guides so rooms close cleanly.</div>
-        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-soft);">
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
             <span class="micro-label" style="margin:0;">Double-line walls</span>
             <button class="btn soft sm" data-action="consolidate-double-walls" title="Merge all double-line CAD walls into single walls with thickness">${I('sliders')} Auto-merge</button>

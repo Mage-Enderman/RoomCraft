@@ -2731,34 +2731,34 @@
       ];
 
       const html = `
-        <div style="font-size:13px;color:var(--ink-2);margin-bottom:14px;line-height:1.5;">
+        <div style="font-size:13px;color:#5f6068;margin-bottom:14px;line-height:1.5;">
           <b>${filename}</b> · ${analysis.entityCount} entities
-          ${analysis.doorCount ? ` · <span style="color:var(--brand-primary);">${analysis.doorCount} doors</span>` : ''}
+          ${analysis.doorCount ? ` · <span style="color:#5b4bf6;">${analysis.doorCount} doors</span>` : ''}
           ${analysis.windowCount ? ` · <span style="color:#0284c7;">${analysis.windowCount} windows</span>` : ''}
           ${analysis.outliersFiltered ? ` · <span style="color:#d97706;">${analysis.outliersFiltered} rogue entities ignored</span>` : ''}
         </div>
         ${analysis.layers && analysis.layers.length ? `
-        <div style="background:var(--surface-sunken);border:1px solid var(--border-soft);border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12px;">
-          <span style="font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-3);display:block;margin-bottom:6px;">Detected CAD Layers & Roles</span>
+        <div style="background:#f2f1f5;border:1px solid rgba(30,31,36,.12);border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12px;">
+          <span style="font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:#86878f;display:block;margin-bottom:6px;">Detected CAD Layers & Roles</span>
           <div style="display:flex;flex-wrap:wrap;gap:6px;">
-            ${analysis.layers.map(l => `<span style="background:var(--surface-card);border:1px solid var(--border-soft);padding:2px 8px;border-radius:6px;font-size:11px;"><b>${l.name}</b> (${l.count}) · <span style="color:var(--brand-primary);font-weight:500;">${l.role}</span></span>`).join('')}
+            ${analysis.layers.map(l => `<span style="background:#ffffff;border:1px solid rgba(30,31,36,.12);padding:2px 8px;border-radius:6px;font-size:11px;"><b>${l.name}</b> (${l.count}) · <span style="color:#5b4bf6;font-weight:500;">${l.role}</span></span>`).join('')}
           </div>
         </div>
         ` : ''}
-        <div style="background:var(--surface-sunken);border:1px solid var(--border-soft);border-radius:10px;padding:12px;margin-bottom:14px;">
+        <div style="background:#f2f1f5;border:1px solid rgba(30,31,36,.12);border-radius:10px;padding:12px;margin-bottom:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <span style="font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-3);">Drawing scale / units</span>
-            <span id="cadResultDims" style="font-size:12px;font-weight:600;color:var(--brand-primary);">${analysis.scaledW} m × ${analysis.scaledH} m</span>
+            <span style="font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#86878f;">Drawing scale / units</span>
+            <span id="cadResultDims" style="font-size:12px;font-weight:600;color:#5b4bf6;">${analysis.scaledW} m × ${analysis.scaledH} m</span>
           </div>
           <div style="display:grid;grid-template-columns:1fr;gap:6px;">
             ${units.map((u) => `
-              <label style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--surface-card);border:1px solid var(--border-soft);border-radius:8px;cursor:pointer;">
+              <label style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#ffffff;border:1px solid rgba(30,31,36,.12);border-radius:8px;cursor:pointer;">
                 <span style="display:flex;align-items:center;gap:8px;">
                   <input type="radio" name="cadUnit" value="${u.factor}" ${u.id === recommendedUnit ? 'checked' : ''}>
                   <b>${u.label}</b>
-                  ${u.id === recommendedUnit ? `<span class="badge" style="background:var(--brand-primary);color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;">Recommended</span>` : ''}
+                  ${u.id === recommendedUnit ? `<span class="badge" style="background:#5b4bf6;color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;">Recommended</span>` : ''}
                 </span>
-                <span style="color:var(--ink-3);font-size:12px;">${u.w} m × ${u.h} m</span>
+                <span style="color:#86878f;font-size:12px;">${u.w} m × ${u.h} m</span>
               </label>
             `).join('')}
           </div>
@@ -2854,11 +2854,11 @@
       const placeholderStr = isImp ? "e.g. 42' 6\"" : 'e.g. 21.18';
 
       const html = `
-        <div style="font-size:13px;color:var(--ink-2);margin-bottom:14px;line-height:1.5;">
-          Current plan dimensions: <b style="color:var(--ink-1);">${fmtLen(curW)} wide × ${fmtLen(curH)} deep</b>
+        <div style="font-size:13px;color:#5f6068;margin-bottom:14px;line-height:1.5;">
+          Current plan dimensions: <b style="color:#25262b;">${fmtLen(curW)} wide × ${fmtLen(curH)} deep</b>
         </div>
-        <div style="background:var(--surface-sunken);border:1px solid var(--border-soft);border-radius:10px;padding:12px;margin-bottom:14px;">
-          <div style="font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-3);margin-bottom:8px;">Quick Unit Conversions</div>
+        <div style="background:#f2f1f5;border:1px solid rgba(30,31,36,.12);border-radius:10px;padding:12px;margin-bottom:14px;">
+          <div style="font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#86878f;margin-bottom:8px;">Quick Unit Conversions</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
             <button class="btn soft sm" data-scale-btn="0.0254">Inches → Meters (×0.0254)</button>
             <button class="btn soft sm" data-scale-btn="0.001">Millimeters → Meters (×0.001)</button>
@@ -2870,12 +2870,12 @@
         </div>
         <div style="display:flex;flex-direction:column;gap:10px;">
           <label class="modal-input" style="display:flex;flex-direction:column;gap:4px;">
-            <span style="font-weight:600;font-size:12px;color:var(--ink-2);">Or specify Target Width (${unitLabel}):</span>
-            <input type="text" id="targetWidthInput" placeholder="${placeholderStr}" style="padding:8px 10px;background:var(--surface-card);border:1px solid var(--border-soft);border-radius:8px;color:var(--ink-1);">
+            <span style="font-weight:600;font-size:12px;color:#5f6068;">Or specify Target Width (${unitLabel}):</span>
+            <input type="text" id="targetWidthInput" placeholder="${placeholderStr}" style="padding:8px 10px;background:#ffffff;border:1px solid rgba(30,31,36,.12);border-radius:8px;color:#25262b;">
           </label>
           <label class="modal-input" style="display:flex;flex-direction:column;gap:4px;">
-            <span style="font-weight:600;font-size:12px;color:var(--ink-2);">Or Custom Scale Factor multiplier:</span>
-            <input type="number" id="customScaleInput" step="0.001" min="0.0001" max="1000" value="1.0" style="padding:8px 10px;background:var(--surface-card);border:1px solid var(--border-soft);border-radius:8px;color:var(--ink-1);">
+            <span style="font-weight:600;font-size:12px;color:#5f6068;">Or Custom Scale Factor multiplier:</span>
+            <input type="number" id="customScaleInput" step="0.001" min="0.0001" max="1000" value="1.0" style="padding:8px 10px;background:#ffffff;border:1px solid rgba(30,31,36,.12);border-radius:8px;color:#25262b;">
           </label>
         </div>
       `;
