@@ -119,12 +119,23 @@
         }
       }, true);
 
+      document.addEventListener('focusout', (e) => {
+        if (e.target && e.target.dataset && e.target.dataset.roomName) this._activeSetting = null;
+      });
+
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
           if (this._modal) return;
           this.closeMenus();
         }
         const el = e.target;
+        if (el && el.matches && el.matches('input[data-room-name]')) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            el.blur();
+          }
+          return;
+        }
         if (
           el &&
           el.matches &&
@@ -210,6 +221,58 @@
 
     renderStep() {
       this.renderSidebar();
+    }
+
+    // Update room name labels in place while the user types, avoiding a sidebar
+    // rebuild that would drop focus and the caret from the name field.
+    updateRoomNameLive(roomId, name) {
+      const root = this.els && this.els.sideScroll;
+      if (!root) return;
+      const text = name == null ? '' : String(name);
+      root.querySelectorAll('[data-room-name-label="' + roomId + '"]').forEach((node) => {
+        node.textContent = text;
+      });
+    }
+
+    // Sync auto-detect / manual-mode chrome without rebuilding the sidebar, so
+    // editing a room name never steals focus or swallows the next click.
+    updateRoomModeLive() {
+      const root = this.els && this.els.sideScroll;
+      if (!root) return;
+      const isAuto = this.app.plan.autoDetectRooms !== false;
+      const banner = root.querySelector('[data-room-mode-banner]');
+      if (banner) {
+        banner.classList.toggle('auto', isAuto);
+        banner.classList.toggle('manual', !isAuto);
+        const pill = banner.querySelector('.mode-pill');
+        if (pill) {
+          pill.classList.toggle('auto', isAuto);
+          pill.classList.toggle('manual', !isAuto);
+        }
+        const pillText = banner.querySelector('[data-room-mode-pill]');
+        if (pillText) pillText.textContent = isAuto ? 'Auto-detect: Active' : 'Manual Mode';
+        const sub = banner.querySelector('[data-room-mode-sub]');
+        if (sub) sub.textContent = isAuto ? 'Rooms update on wall edits' : 'Auto-detect paused; labels locked';
+        const btn = banner.querySelector('[data-room-mode-toggle]');
+        if (btn) {
+          btn.classList.toggle('soft', isAuto);
+          btn.classList.toggle('primary', !isAuto);
+          btn.innerHTML = isAuto ? 'Pause auto' : I('rotate') + ' Auto-detect';
+          btn.title = isAuto
+            ? 'Pause automatic room detection to keep manual adjustments'
+            : 'Turn on automatic room detection from current walls';
+        }
+      }
+      const count = root.querySelector('[data-room-mode-count]');
+      if (count) count.textContent = (this.app.rooms || []).length + (isAuto ? ' detected' : ' assigned (manual)');
+
+      const sel = this.app.ui.selection;
+      const selRoom = sel && sel.type === 'room' ? (this.app.rooms || []).find((r) => r.id === sel.id) : null;
+      const eyebrow = root.querySelector('[data-room-mode-eyebrow]');
+      if (eyebrow) {
+        const manual = !isAuto || !!(selRoom && selRoom.isManual);
+        eyebrow.textContent = manual ? 'Manual Room (Locked)' : 'Detected Room';
+      }
     }
 
     updateHeader() {
@@ -737,7 +800,7 @@
         }).length;
         return `<div class="sel-card">
           <div class="sel-head">
-            <div><span class="eyebrow">${isManual ? 'Manual Room (Locked)' : 'Detected Room'}</span><div class="sel-title">${esc(room.name || t.label)}</div></div>
+            <div><span class="eyebrow" data-room-mode-eyebrow>${isManual ? 'Manual Room (Locked)' : 'Detected Room'}</span><div class="sel-title" data-room-name-label="${room.id}">${esc(room.name || t.label)}</div></div>
             <button class="icon-btn soft" data-action="clear-selection" title="Deselect">${I('close')}</button>
           </div>
           <div class="sel-metrics two">
@@ -857,14 +920,14 @@
       const selectedRoom = this.app.ui.selection && this.app.ui.selection.type === 'room' ? rooms.find((r) => r.id === this.app.ui.selection.id) : null;
 
       return `<section class="panel-block">
-        ${this.moduleHead('Rooms', rooms.length + (isAuto ? ' detected' : ' assigned (manual)'))}
+        ${this.moduleHead('Rooms', `<span data-room-mode-count>${rooms.length + (isAuto ? ' detected' : ' assigned (manual)')}</span>`)}
 
-        <div class="room-mode-banner ${isAuto ? 'auto' : 'manual'}" style="margin-bottom:10px;">
+        <div class="room-mode-banner ${isAuto ? 'auto' : 'manual'}" data-room-mode-banner style="margin-bottom:10px;">
           <div class="mode-info">
-            <span class="mode-pill ${isAuto ? 'auto' : 'manual'}"><span class="pill-dot"></span>${isAuto ? 'Auto-detect: Active' : 'Manual Mode'}</span>
-            <span class="mode-sub">${isAuto ? 'Rooms update on wall edits' : 'Auto-detect paused; labels locked'}</span>
+            <span class="mode-pill ${isAuto ? 'auto' : 'manual'}"><span class="pill-dot"></span><span data-room-mode-pill>${isAuto ? 'Auto-detect: Active' : 'Manual Mode'}</span></span>
+            <span class="mode-sub" data-room-mode-sub>${isAuto ? 'Rooms update on wall edits' : 'Auto-detect paused; labels locked'}</span>
           </div>
-          <button class="btn ${isAuto ? 'soft' : 'primary'} xs" data-action="toggle-auto-detect" title="${isAuto ? 'Pause automatic room detection to keep manual adjustments' : 'Turn on automatic room detection from current walls'}">
+          <button class="btn ${isAuto ? 'soft' : 'primary'} xs" data-action="toggle-auto-detect" data-room-mode-toggle title="${isAuto ? 'Pause automatic room detection to keep manual adjustments' : 'Turn on automatic room detection from current walls'}">
             ${isAuto ? 'Pause auto' : `${I('rotate')} Auto-detect`}
           </button>
         </div>
@@ -916,14 +979,14 @@
               const areaStr = FC.formatArea ? FC.formatArea(r.area, this.app.plan, 1) : FC.fmt(r.area, 1) + ' m²';
               return `<button type="button" class="room-row ${active ? 'active' : ''}" data-action="focus-room" data-room="${r.id}">
                 <span class="room-dot" style="background:${t.color}"></span>
-                <span class="room-main"><b>${esc(r.name || t.label)}</b><span>${areaStr}</span></span>
+                <span class="room-main"><b data-room-name-label="${r.id}">${esc(r.name || t.label)}</b><span>${areaStr}</span></span>
                 <span class="room-kind">${t.label.replace(' room', '')}</span>
               </button>`;
             })
             .join('')}
         </div>` : `<p class="helper" style="margin-top:10px;">No enclosed rooms yet. Draw walls or click <b>Draw room</b> above to define spaces.</p>`}
         ${selectedRoom ? `<div class="room-types" style="margin-top:12px;">
-          <div class="micro-label" style="margin-bottom:6px;">Type: ${esc(selectedRoom.name || 'Room')}</div>
+          <div class="micro-label" style="margin-bottom:6px;">Type: <span data-room-name-label="${selectedRoom.id}">${esc(selectedRoom.name || 'Room')}</span></div>
           ${this.typeGrid(selectedRoom)}
         </div>` : `<p class="helper tight" style="margin-top:10px;">Click any room on canvas or in the list above to rename it, assign its type, or regenerate its furniture.</p>`}
       </section>`;
@@ -980,7 +1043,7 @@
                 const active = selectedRoom && selectedRoom.id === r.id;
                 return `<button type="button" class="room-row ${active ? 'active' : ''}" data-action="focus-room" data-room="${r.id}" data-keep-step="1">
                   <span class="room-dot" style="background:${t.color}"></span>
-                  <span class="room-main"><b>${esc(r.name || t.label)}</b><span>${rPieces} piece${rPieces === 1 ? '' : 's'}</span></span>
+                  <span class="room-main"><b data-room-name-label="${r.id}">${esc(r.name || t.label)}</b><span>${rPieces} piece${rPieces === 1 ? '' : 's'}</span></span>
                   <span class="room-kind">${t.label.replace(' room', '')}</span>
                 </button>`;
               })
@@ -1213,6 +1276,7 @@
       if (el.dataset.furnitureRot) return 'furnRot:' + el.dataset.furnitureRot;
       if (el.dataset.opField) return 'op:' + el.dataset.opField;
       if (el.dataset.wallLen) return 'wallLen:' + el.dataset.wallLen;
+      if (el.dataset.roomName) return 'roomName:' + el.dataset.roomName;
       return 'value';
     }
 
@@ -1357,6 +1421,7 @@
         return;
       }
       if (el.dataset && el.dataset.roomName) {
+        this.ensureHistory(el);
         this.app.setRoomName(el.dataset.roomName, el.value);
         return;
       }
@@ -1384,6 +1449,11 @@
     onChange(e) {
       if (e.target.dataset && e.target.dataset.action === 'set-wall-anchor') {
         this.app.wallAnchorEnd = parseInt(e.target.value, 10);
+        return;
+      }
+      if (e.target.dataset && e.target.dataset.roomName) {
+        this._activeSetting = null;
+        this.app.setRoomName(e.target.dataset.roomName, e.target.value);
         return;
       }
       if (!e.target.matches || !e.target.matches('input')) return;

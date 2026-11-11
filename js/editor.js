@@ -698,6 +698,41 @@
       this.zoomBy(factor, p);
     }
 
+    selectionIncludesWallKey(sel, key) {
+      if (!sel || sel.type !== 'walls' || !key) return false;
+      if (Array.isArray(sel.keys) && sel.keys.includes(key)) return true;
+      if (key.indexOf('w:') === 0 && Array.isArray(sel.ids) && sel.ids.includes(key.slice(2))) return true;
+      return false;
+    }
+
+    // True when a hit belongs to the current multi-wall selection. Used so that
+    // grabbing any selected wall, shared corner, opening, or included item
+    // moves the whole group instead of editing just that piece. Covers both
+    // interior walls ('w:*') and outline/boundary segments ('o:*').
+    hitInMultiSelection(hit) {
+      const sel = this.app.ui && this.app.ui.selection;
+      if (!sel || sel.type !== 'walls' || !hit) return false;
+      if (hit.type === 'wall') return this.selectionIncludesWallKey(sel, hit.seg && hit.seg.key);
+      if (hit.type === 'opening') return this.selectionIncludesWallKey(sel, hit.op && hit.op.hostKey);
+      if (hit.type === 'junction') {
+        const n = (this.app.plan.outline || []).length;
+        return (hit.junction.refs || []).some((ref) => {
+          if (ref.type === 'wall') return this.selectionIncludesWallKey(sel, 'w:' + ref.wallId);
+          if (ref.type === 'outline' && n > 0) {
+            // Vertex `index` is the start of edge `index` and the end of `index - 1`.
+            return (
+              this.selectionIncludesWallKey(sel, 'o:' + ref.index) ||
+              this.selectionIncludesWallKey(sel, 'o:' + ((ref.index - 1 + n) % n))
+            );
+          }
+          return false;
+        });
+      }
+      if (hit.type === 'furniture') return Array.isArray(sel.furnitureIds) && sel.furnitureIds.includes(hit.furniture.id);
+      if (hit.type === 'light') return Array.isArray(sel.lightIds) && sel.lightIds.includes(hit.light.id);
+      return false;
+    }
+
     onPointerDown(e) {
       if (this.app.ui.view3d) return;
       if (document.body.classList.contains('has-overlay')) return;
@@ -890,6 +925,14 @@
 
       const hit = this.hitTest(w);
       if (hit) {
+        // Multi-wall selection acts as one draggable unit. Junction handles sit
+        // on top of wall ends in hit-testing, so without this a drag near a
+        // shared corner (or on a short wall) would move a single endpoint
+        // instead of the group. Shift-click still toggles membership.
+        if (!e.shiftKey && this.hitInMultiSelection(hit)) {
+          this.drag = { type: 'walls-group', startW: { x: w.x, y: w.y }, moved: false, pushed: false };
+          return;
+        }
         if (hit.type === 'room-vertex') {
           this.app.select({ type: 'room', id: hit.roomId });
           this.drag = { type: 'room-vertex', roomId: hit.roomId, index: hit.index, moved: false, pushed: false };
@@ -1365,11 +1408,35 @@
         if (!this.drag.startW) this.drag.startW = { x: w.x, y: w.y };
         if (!this.drag.origWalls) {
           this.drag.origWalls = new Map();
-          (sel.ids || []).forEach((wid) => {
+          const wallIds = [];
+          (sel.ids || []).forEach((id) => {
+            if (id && !wallIds.includes(id)) wallIds.push(id);
+          });
+          (sel.keys || []).forEach((key) => {
+            if (key.indexOf('w:') !== 0) return;
+            const id = key.slice(2);
+            if (id && !wallIds.includes(id)) wallIds.push(id);
+          });
+          wallIds.forEach((wid) => {
             const wall = plan.walls.find((x) => x.id === wid);
             if (wall) {
               this.drag.origWalls.set(wid, { a: { x: wall.a.x, y: wall.a.y }, b: { x: wall.b.x, y: wall.b.y } });
             }
+          });
+          // Boundary segments live on plan.outline rather than plan.walls, so
+          // snapshot the outline vertices that the selected edges touch.
+          this.drag.origOutline = new Map();
+          const outline = plan.outline || [];
+          const n = outline.length;
+          (sel.keys || []).forEach((key) => {
+            if (key.indexOf('o:') !== 0 || n < 2) return;
+            const i = parseInt(key.slice(2), 10);
+            if (!isFinite(i)) return;
+            [i % n, (i + 1) % n].forEach((idx) => {
+              if (!this.drag.origOutline.has(idx) && outline[idx]) {
+                this.drag.origOutline.set(idx, { x: outline[idx].x, y: outline[idx].y });
+              }
+            });
           });
           this.drag.origFurn = new Map();
           if (this.app.furniture && Array.isArray(sel.furnitureIds)) {
@@ -1401,6 +1468,15 @@
             wall.b.y = FC.round(orig.b.y + dy, 3);
           }
         });
+        if (this.drag.origOutline) {
+          this.drag.origOutline.forEach((orig, idx) => {
+            const p = (plan.outline || [])[idx];
+            if (p) {
+              p.x = FC.round(orig.x + dx, 3);
+              p.y = FC.round(orig.y + dy, 3);
+            }
+          });
+        }
         this.drag.origFurn.forEach((orig, fid) => {
           const f = (this.app.furniture || []).find((item) => item.id === fid);
           if (f) {
@@ -1964,6 +2040,7 @@
       if (this.drag && this.drag.type === 'pan') c = 'grabbing';
       else if (this.spaceDown || tool === 'pan') c = 'grab';
       else if (tool === 'outline' || tool === 'wall' || tool === 'divider' || tool === 'room' || tool === 'rect' || tool === 'measure' || tool === 'door' || tool === 'window' || tool === 'opening') c = 'crosshair';
+      else if (this.hover && this.hitInMultiSelection(this.hover)) c = 'move';
       else if (this.hover) c = 'pointer';
       this.canvas.style.cursor = c;
     }
@@ -3882,8 +3959,10 @@
         ctx.fillStyle = '#ffffff';
         ctx.fill();
         ctx.stroke();
+        const grouped = this.hitInMultiSelection(this.hover);
         const wallCount = j.refs ? j.refs.length : 1;
-        const label = wallCount > 1 ? `Slide junction (${wallCount} walls)` : 'Slide wall end';
+        const selCount = grouped ? ((this.app.ui.selection.keys || []).length || 1) : 0;
+        const label = grouped ? `Move ${selCount} selected wall${selCount === 1 ? '' : 's'}` : wallCount > 1 ? `Slide junction (${wallCount} walls)` : 'Slide wall end';
         this.drawPill(s.x, s.y - 22, label, 'accent');
         ctx.restore();
         return;

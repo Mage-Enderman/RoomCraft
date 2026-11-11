@@ -323,7 +323,13 @@
       if (opts.save !== false) {
         this.saveSoon();
         if (this.ui) {
-          this.ui.renderSidebar();
+          if (opts.render === false) {
+            // Live typing: refresh stats without rebuilding the sidebar, so a
+            // focused field keeps its focus and caret.
+            this.ui.updateStats();
+          } else {
+            this.ui.renderSidebar();
+          }
           this.ui.renderStepper();
           this.ui.renderToolrail();
           this.ui.updateHeader();
@@ -593,7 +599,7 @@
       if (this.editor) this.editor.draw();
     }
 
-    disableAutoDetectRooms(quiet = false) {
+    disableAutoDetectRooms(quiet = false, opts = {}) {
       if (!this.plan) return;
       if (this.plan.autoDetectRooms === false) return;
       this.plan.autoDetectRooms = false;
@@ -601,7 +607,7 @@
       if (!quiet) {
         this.toast('Switched to manual room mode (auto-detection paused)', 'info');
       }
-      if (this.ui) {
+      if (this.ui && !opts.skipRender) {
         this.ui.renderStep();
         this.ui.renderSidebar();
       }
@@ -725,7 +731,7 @@
       const room = (this.rooms || []).find((r) => r.id === roomId);
       if (!room) return;
       if (this.plan.autoDetectRooms !== false) {
-        this.disableAutoDetectRooms(true);
+        this.disableAutoDetectRooms(true, { skipRender: true });
         this.toast('Room renamed — auto-detection paused to protect manual edits', 'info');
       }
       room.name = name;
@@ -735,9 +741,13 @@
         const mr = this.plan.manualRooms.find((m) => m.id === roomId);
         if (mr) mr.name = name;
       }
-      this.changed({ save: true });
+      this.changed({ save: true, render: false });
       if (this.editor) this.editor.draw();
-      if (this.ui) this.ui.renderStep();
+      if (this.ui) {
+        const typeLabel = (FC.roomTypes[room.type] || {}).label || 'Room';
+        this.ui.updateRoomNameLive(roomId, name || typeLabel);
+        this.ui.updateRoomModeLive();
+      }
     }
 
     deleteRoom(roomId) {
