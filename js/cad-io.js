@@ -19,23 +19,62 @@
       lines.push(String(val));
     }
 
-    // Header section
+    // R12 has no LWPOLYLINE; write the equivalent old-style POLYLINE.
+    function writePolyline(layer, points, closed, width) {
+      w(0, 'POLYLINE');
+      w(8, layer);
+      w(66, 1);
+      w(10, 0.0);
+      w(20, 0.0);
+      w(30, 0.0);
+      w(70, closed ? 1 : 0);
+      if (width) {
+        w(40, width.toFixed(4));
+        w(41, width.toFixed(4));
+      }
+      points.forEach((pt) => {
+        w(0, 'VERTEX');
+        w(8, layer);
+        w(10, pt.x.toFixed(4));
+        w(20, (-pt.y).toFixed(4));
+        w(30, 0.0);
+        if (width) {
+          w(40, width.toFixed(4));
+          w(41, width.toFixed(4));
+        }
+      });
+      w(0, 'SEQEND');
+      w(8, layer);
+    }
+
+    // Header section. R12 (AC1009) is used deliberately: it needs no
+    // subclass markers, handles or object section, so AutoCAD can always
+    // open the generated file. Newer version tags require a full R2000+
+    // DXF structure and make AutoCAD reject this minimal geometry.
     w(0, 'SECTION');
     w(2, 'HEADER');
     w(9, '$ACADVER');
-    w(1, 'AC1018'); // AutoCAD 2004 / modern standard
-    w(9, '$INSUNITS');
-    w(70, 6); // 6 = Meters
+    w(1, 'AC1009'); // AutoCAD R12 DXF
     w(9, '$MEASUREMENT');
     w(70, 1); // 1 = Metric
     w(0, 'ENDSEC');
 
-    // Tables section: Layers
+    // Tables section: required symbol tables for R12
     w(0, 'SECTION');
     w(2, 'TABLES');
+
+    // Linetype table
     w(0, 'TABLE');
-    w(2, 'LAYER');
-    w(70, 7);
+    w(2, 'LTYPE');
+    w(70, 1);
+    w(0, 'LTYPE');
+    w(2, 'CONTINUOUS');
+    w(70, 64);
+    w(3, 'Solid line');
+    w(72, 65);
+    w(73, 0);
+    w(40, 0.0);
+    w(0, 'ENDTAB');
 
     const layers = [
       { name: 'WALL_EXTERIOR', color: 7 }, // White / Black
@@ -48,6 +87,11 @@
       { name: 'LIGHTS', color: 5 },        // Blue
     ];
 
+    // Layer table
+    w(0, 'TABLE');
+    w(2, 'LAYER');
+    w(70, layers.length);
+
     layers.forEach((lay) => {
       w(0, 'LAYER');
       w(2, lay.name);
@@ -57,6 +101,23 @@
     });
 
     w(0, 'ENDTAB');
+
+    // Text style table (TEXT entities reference STANDARD)
+    w(0, 'TABLE');
+    w(2, 'STYLE');
+    w(70, 1);
+    w(0, 'STYLE');
+    w(2, 'STANDARD');
+    w(70, 0);
+    w(40, 0.0);
+    w(41, 1.0);
+    w(50, 0.0);
+    w(71, 0);
+    w(42, 0.2);
+    w(3, 'txt');
+    w(4, '');
+    w(0, 'ENDTAB');
+
     w(0, 'ENDSEC');
 
     // Blocks section (empty table required by AutoCAD)
@@ -71,15 +132,12 @@
     // 1. Exterior Walls (Outline)
     const outline = plan.outline || [];
     if (outline.length >= 3) {
-      w(0, 'LWPOLYLINE');
-      w(8, 'WALL_EXTERIOR');
-      w(90, outline.length);
-      w(70, 1); // 1 = Closed polyline
-      w(43, plan.settings ? plan.settings.extThickness || 0.2 : 0.2); // Constant width
-      outline.forEach((pt) => {
-        w(10, pt.x.toFixed(4));
-        w(20, (-pt.y).toFixed(4)); // Flip Y for CAD standard (Y up)
-      });
+      writePolyline(
+        'WALL_EXTERIOR',
+        outline,
+        true,
+        plan.settings ? plan.settings.extThickness || 0.2 : 0.2
+      );
     }
 
     // 2. Interior Walls
@@ -237,14 +295,7 @@
         { x: f.x + (-hw * cos - hd * sin), y: f.y + (-hw * sin + hd * cos) },
       ];
 
-      w(0, 'LWPOLYLINE');
-      w(8, 'FURNITURE');
-      w(90, 4);
-      w(70, 1); // Closed
-      corners.forEach((c) => {
-        w(10, c.x.toFixed(4));
-        w(20, (-c.y).toFixed(4));
-      });
+      writePolyline('FURNITURE', corners, true, 0);
 
       // Label
       w(0, 'TEXT');
@@ -327,6 +378,49 @@
   };
 
   /* ------------------------------------------------------------------ */
+  /* Layer / entity classification helpers                              */
+  /* ------------------------------------------------------------------ */
+
+  function isWindowLayer(layer) {
+    return /win|glaz|fenster|vitr|vidrio/i.test(layer || '');
+  }
+
+  function isDoorLayer(layer) {
+    return /door|tuer|porte|porta|puerta/i.test(layer || '');
+  }
+
+  function isIgnoredLayer(layer) {
+    const s = String(layer || '');
+    if (!s) return true;
+    return /construct|guide|grid|axis|centre|center|dimension|dim\b|text|label|annot|hatch|fill|furniture|furn\b|light|electric|plumb|sanit|defpoint|viewport|title|border|frame|roof|site|terrain|landscap|elevation|section|detail|legend|schedule|north|marker|symbol|template|xref|hidden|stair|handrail|railing|shelv|cabinet|appliance/i.test(s);
+  }
+
+  function isExteriorLayer(layer) {
+    return /outer|exterior|perimeter|boundary|facade|shell|outside/i.test(layer || '');
+  }
+
+  function isWallLayer(layer) {
+    return /wall|wand|muro|muri|mur\b|partition|cloison|parede|pared|tabique|divider|interior/i.test(layer || '');
+  }
+
+  function layerRole(layer, hasNamedWallLayers) {
+    if (isWindowLayer(layer)) return 'windows';
+    if (isDoorLayer(layer)) return 'doors';
+    if (isIgnoredLayer(layer)) return 'ignored';
+    if (isExteriorLayer(layer)) return 'outline';
+    if (isWallLayer(layer)) return 'walls';
+    // Unnamed layer: walls are detected from the geometry (paired faces).
+    return hasNamedWallLayers ? 'auto' : 'walls';
+  }
+
+  function median(values) {
+    if (!values.length) return 0;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  /* ------------------------------------------------------------------ */
   /* DXF Analyzer (Pre-import inspection)                               */
   /* ------------------------------------------------------------------ */
 
@@ -362,11 +456,19 @@
     }
     if (cur) entities.push(cur);
 
+    const layerNames = new Set();
+    entities.forEach((e) => layerNames.add((e.props[8] && e.props[8][0]) || '0'));
+    const hasNamedWallLayers = Array.from(layerNames).some(
+      (l) => isWallLayer(l) || isExteriorLayer(l)
+    );
+
     const pts = [];
     let doorCount = 0;
     let windowCount = 0;
 
     entities.forEach((e) => {
+      const layer = (e.props[8] && e.props[8][0]) || '0';
+      if (isIgnoredLayer(layer)) return;
       if (e.type === 'LINE') {
         const x1 = parseFloat(e.props[10] ? e.props[10][0] : 0);
         const y1 = parseFloat(e.props[20] ? e.props[20][0] : 0);
@@ -378,11 +480,17 @@
         const xs = (e.props[10] || []).map(Number);
         const ys = (e.props[20] || []).map(Number);
         for (let j = 0; j < xs.length; j++) pts.push({ x: xs[j], y: ys[j] });
+      } else if (e.type === 'ARC') {
+        const cx = parseFloat(e.props[10] ? e.props[10][0] : 0);
+        const cy = parseFloat(e.props[20] ? e.props[20][0] : 0);
+        const r = parseFloat(e.props[40] ? e.props[40][0] : 0);
+        pts.push({ x: cx - r, y: cy - r });
+        pts.push({ x: cx + r, y: cy + r });
+        if (isDoorLayer(layer)) doorCount++;
       } else if (e.type === 'INSERT') {
         const name = (e.props[2] && e.props[2][0]) || '';
-        const layer = (e.props[8] && e.props[8][0]) || '';
-        if (/door/i.test(name) || /door/i.test(layer)) doorCount++;
-        if (/window|glaz/i.test(name) || /window|glaz/i.test(layer)) windowCount++;
+        if (/door/i.test(name) || isDoorLayer(layer)) doorCount++;
+        if (/window|glaz/i.test(name) || isWindowLayer(layer)) windowCount++;
         const x = parseFloat(e.props[10] ? e.props[10][0] : 0);
         const y = parseFloat(e.props[20] ? e.props[20][0] : 0);
         pts.push({ x, y, isInsert: true });
@@ -398,15 +506,12 @@
       rec.types.add(e.type);
     });
     const layers = Array.from(layerMap.values()).map((l) => {
-      let role = 'walls';
-      if (/win|glaz|fenster/i.test(l.name)) role = 'windows';
-      else if (/door|tuer|porte/i.test(l.name)) role = 'doors';
-      else if (/outer|exterior|perimeter|boundary|facade/i.test(l.name)) role = 'outline';
+      const role = layerRole(l.name, hasNamedWallLayers);
       return { name: l.name, count: l.count, role, types: Array.from(l.types) };
     });
 
     if (!pts.length) {
-      return { rawW: 10, rawH: 10, unit: 'm', unitFactor: 1.0, unitLabel: 'Meters (m)', scaledW: 10, scaledH: 10, entityCount: 0, doorCount: 0, windowCount: 0, outliersFiltered: 0 };
+      return { rawW: 10, rawH: 10, unit: 'm', unitFactor: 1.0, unitLabel: 'Meters (m)', scaledW: 10, scaledH: 10, entityCount: 0, doorCount: 0, windowCount: 0, outliersFiltered: 0, layers };
     }
 
     const xs = pts.map((p) => p.x).sort((a, b) => a - b);
@@ -464,6 +569,263 @@
   };
 
   /* ------------------------------------------------------------------ */
+  /* Geometry helpers for CAD reconstruction                            */
+  /* ------------------------------------------------------------------ */
+
+  function angleDiff(a, b) {
+    let d = Math.abs(a - b) % (Math.PI * 2);
+    if (d > Math.PI) d = Math.PI * 2 - d;
+    return d;
+  }
+
+  function segLength(s) {
+    return Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y);
+  }
+
+  function segMid(s) {
+    return { x: (s.a.x + s.b.x) / 2, y: (s.a.y + s.b.y) / 2 };
+  }
+
+  // Pair the two parallel face lines of CAD walls into one centreline and
+  // discard the short perpendicular caps / jambs that join those faces.
+  function mergeWallCenterlines(segments, enabled, capLength, debug) {
+    if (!enabled) {
+      return segments
+        .filter((s) => segLength(s) > 0.08)
+        .map((s) => ({ a: s.a, b: s.b, layer: s.layer, thickness: null, exterior: isExteriorLayer(s.layer) }));
+    }
+
+    // Remove exact duplicates first (same wall face exported twice)
+    const unique = [];
+    const seen = new Set();
+    segments.forEach((s) => {
+      if (segLength(s) < 0.05) return;
+      const k1 = Math.round(s.a.x * 1000) + ',' + Math.round(s.a.y * 1000);
+      const k2 = Math.round(s.b.x * 1000) + ',' + Math.round(s.b.y * 1000);
+      const key = k1 < k2 ? k1 + '|' + k2 : k2 + '|' + k1;
+      if (seen.has(key)) return;
+      seen.add(key);
+      unique.push(s);
+    });
+
+    // Score every parallel pair that could be the two faces of one wall, then
+    // accept the best pairs first. Pairing each line with its closest parallel
+    // neighbour (the old greedy-by-index scan) let a long wall face be stolen
+    // by a neighbouring wall, which silently deleted whole partitions.
+    const items = unique.map((s) => {
+      const len = segLength(s);
+      const ux = len > 0 ? (s.b.x - s.a.x) / len : 0;
+      const uy = len > 0 ? (s.b.y - s.a.y) / len : 0;
+      return { s, len, ux, uy, angle: Math.atan2(uy, ux) };
+    });
+
+    const candidates = [];
+    for (let i = 0; i < items.length; i++) {
+      const s1 = items[i];
+      if (s1.len < 0.06) continue;
+      for (let j = i + 1; j < items.length; j++) {
+        const s2 = items[j];
+        if (s2.len < 0.06) continue;
+        if (angleDiff(s1.angle, s2.angle) > 0.14) continue;
+
+        const m2 = segMid(s2.s);
+        const perp = Math.abs((m2.x - s1.s.a.x) * s1.uy - (m2.y - s1.s.a.y) * s1.ux);
+        // Wall faces from an unnamed layer must look like a real wall before
+        // they are trusted: a plausible thickness instead of any close line
+        // (window sills, glazing, furniture outlines).
+        const weakPair = s1.s.weak || s2.s.weak;
+        const minPerp = weakPair ? 0.07 : 0.035;
+        const maxPerp = weakPair ? 0.4 : 0.55;
+        if (perp < minPerp || perp > maxPerp) continue;
+
+        const dx1 = s1.ux * s1.len;
+        const dy1 = s1.uy * s1.len;
+        const tA = ((s2.s.a.x - s1.s.a.x) * dx1 + (s2.s.a.y - s1.s.a.y) * dy1) / (s1.len * s1.len);
+        const tB = ((s2.s.b.x - s1.s.a.x) * dx1 + (s2.s.b.y - s1.s.a.y) * dy1) / (s1.len * s1.len);
+        const overlap = (Math.min(1, Math.max(tA, tB)) - Math.max(0, Math.min(tA, tB))) * s1.len;
+        if (overlap < 0.06) continue;
+        if (overlap < Math.min(0.16, Math.min(s1.len, s2.len) * 0.5)) continue;
+
+        // Long shared span wins; a thin offset wins over a wide one so two
+        // parallel partitions are not stitched into one fat fake wall.
+        const score = overlap * (1 - Math.min(perp, 0.5) / 0.5);
+        candidates.push({ i, j, perp, overlap, score });
+      }
+    }
+    candidates.sort((a, b) => b.score - a.score || a.perp - b.perp);
+
+    const used = new Array(unique.length).fill(false);
+    const centre = [];
+    const loose = [];
+
+    candidates.forEach(({ i, j, perp, overlap }) => {
+      if (used[i] || used[j]) return;
+      const s1 = items[i];
+      const s2 = items[j];
+      if (perp < 0.06 || overlap < 0.2) return;
+
+      const nx1 = -s1.uy;
+      const ny1 = s1.ux;
+      const offset = (s2.s.a.x - s1.s.a.x) * nx1 + (s2.s.a.y - s1.s.a.y) * ny1;
+      const half = offset / 2;
+      const p0 = { x: s1.s.a.x + nx1 * half, y: s1.s.a.y + ny1 * half };
+      const proj = (p) => (p.x - p0.x) * s1.ux + (p.y - p0.y) * s1.uy;
+      const tMin = Math.min(proj(s1.s.a), proj(s1.s.b), proj(s2.s.a), proj(s2.s.b));
+      const tMax = Math.max(proj(s1.s.a), proj(s1.s.b), proj(s2.s.a), proj(s2.s.b));
+      const exterior = isExteriorLayer(s1.s.layer) || isExteriorLayer(s2.s.layer);
+      if (debug) console.log('PAIR', i, j, s1.len.toFixed(2), s2.len.toFixed(2), 'perp', perp.toFixed(3), 'ov', overlap.toFixed(2), 's1', s1.s.a, s1.s.b, 's2', s2.s.a, s2.s.b);
+      centre.push({
+        a: { x: p0.x + s1.ux * tMin, y: p0.y + s1.uy * tMin },
+        b: { x: p0.x + s1.ux * tMax, y: p0.y + s1.uy * tMax },
+        layer: exterior ? (isExteriorLayer(s1.s.layer) ? s1.s.layer : s2.s.layer) : s1.s.layer,
+        thickness: Math.abs(offset),
+        exterior,
+      });
+      used[i] = true;
+      used[j] = true;
+    });
+
+    items.forEach((item, i) => {
+      if (used[i] || item.len < 0.06) return;
+      loose.push({ a: item.s.a, b: item.s.b, layer: item.s.layer, thickness: null, exterior: isExteriorLayer(item.s.layer), weak: !!item.s.weak });
+      if (debug) console.log('LOOSE', i, item.len.toFixed(2), item.s.a, item.s.b, item.s.layer, item.s.weak ? 'weak' : '');
+    });
+
+    // Keep single-line walls, but drop short caps/jambs that sit on a
+    // double-line wall (they are the ends of the missing wall thickness).
+    const result = centre.slice();
+    loose.forEach((s) => {
+      const len = segLength(s);
+      if (len < 0.08) return;
+      // A single line from an unnamed layer is far more likely to be a symbol,
+      // a dimension or a construction line than a wall, so it is dropped.
+      if (s.weak) return;
+      if (len < capLength) {
+        const mid = segMid(s);
+        const angle = Math.atan2(s.b.y - s.a.y, s.b.x - s.a.x);
+        const nearFace = centre.some((c) => {
+          const cLen = segLength(c);
+          if (cLen < 0.1) return false;
+          const cAngle = Math.atan2(c.b.y - c.a.y, c.b.x - c.a.x);
+          const cMid = segMid(c);
+          const dist = Math.abs((mid.x - c.a.x) * (c.b.y - c.a.y) - (mid.y - c.a.y) * (c.b.x - c.a.x)) / cLen;
+          const dot = Math.abs((mid.x - cMid.x) * (c.b.x - c.a.x) + (mid.y - cMid.y) * (c.b.y - c.a.y)) / (cLen * cLen);
+          const inSpan = dot > -0.15 && dot < 1.15;
+          const parallel = angleDiff(angle, cAngle) < 0.25;
+          const perpendicular = Math.abs(angleDiff(angle, cAngle) - Math.PI / 2) < 0.25;
+          return inSpan && dist < 0.36 && (parallel || perpendicular);
+        });
+        if (nearFace) return;
+      }
+      result.push(s);
+    });
+
+    return result;
+  }
+
+  // Join collinear wall pieces across door/window gaps (typical CAD drafting
+  // leaves the wall line open where an opening is scheduled).
+  function bridgeCollinearWalls(walls, maxGap) {
+    const list = walls.slice();
+    list.forEach((w) => {
+      const dx = Math.abs(w.b.x - w.a.x);
+      const dy = Math.abs(w.b.y - w.a.y);
+      if (dy < 0.03 && dx > 0.03) {
+        w.a.y = w.b.y = (w.a.y + w.b.y) / 2;
+        w.orient = 'H';
+      } else if (dx < 0.03 && dy > 0.03) {
+        w.a.x = w.b.x = (w.a.x + w.b.x) / 2;
+        w.orient = 'V';
+      } else {
+        w.orient = 'D';
+      }
+    });
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      outer:
+      for (let i = 0; i < list.length; i++) {
+        const w1 = list[i];
+        if (w1.orient === 'D') continue;
+        const c1 = w1.orient === 'H' ? w1.a.y : w1.a.x;
+        const s1a = w1.orient === 'H' ? Math.min(w1.a.x, w1.b.x) : Math.min(w1.a.y, w1.b.y);
+        const s1b = w1.orient === 'H' ? Math.max(w1.a.x, w1.b.x) : Math.max(w1.a.y, w1.b.y);
+        for (let j = i + 1; j < list.length; j++) {
+          const w2 = list[j];
+          if (w2.orient !== w1.orient) continue;
+          const c2 = w2.orient === 'H' ? w2.a.y : w2.a.x;
+          if (Math.abs(c1 - c2) > 0.08) continue;
+          const s2a = w2.orient === 'H' ? Math.min(w2.a.x, w2.b.x) : Math.min(w2.a.y, w2.b.y);
+          const s2b = w2.orient === 'H' ? Math.max(w2.a.x, w2.b.x) : Math.max(w2.a.y, w2.b.y);
+          const gap = Math.max(s1a, s2a) - Math.min(s1b, s2b);
+          if (gap <= maxGap) {
+            const lo = Math.min(s1a, s2a);
+            const hi = Math.max(s1b, s2b);
+            const c = (c1 + c2) / 2;
+            if (w1.orient === 'H') {
+              w1.a = { x: lo, y: c };
+              w1.b = { x: hi, y: c };
+            } else {
+              w1.a = { x: c, y: lo };
+              w1.b = { x: c, y: hi };
+            }
+            list.splice(j, 1);
+            changed = true;
+            break outer;
+          }
+        }
+      }
+    }
+    return list.filter((w) => segLength(w) > 0.1);
+  }
+
+  function segLiesOnOutline(w, outline, tol) {
+    if (!outline || outline.length < 2) return false;
+    const len = segLength(w);
+    if (len < 0.05) return false;
+    const ux = (w.b.x - w.a.x) / len;
+    const uy = (w.b.y - w.a.y) / len;
+    const mid = segMid(w);
+    for (let i = 0; i < outline.length; i++) {
+      const a = outline[i];
+      const b = outline[(i + 1) % outline.length];
+      const eLen = Math.hypot(b.x - a.x, b.y - a.y);
+      if (eLen < 0.05) continue;
+      const ex = (b.x - a.x) / eLen;
+      const ey = (b.y - a.y) / eLen;
+      if (Math.abs(ux * ex + uy * ey) < 0.995) continue;
+      const dist = Math.abs((mid.x - a.x) * ey - (mid.y - a.y) * ex);
+      if (dist > tol) continue;
+      const t = ((mid.x - a.x) * ex + (mid.y - a.y) * ey) / eLen;
+      if (t >= -0.08 && t <= 1.08) return true;
+    }
+    return false;
+  }
+
+  function findHostSegment(segs, mid, dir, maxDist) {
+    let best = null;
+    segs.forEach((s) => {
+      if (s.len < 0.3) return;
+      const ux = Math.cos(s.angle);
+      const uy = Math.sin(s.angle);
+      const dot = Math.abs(dir.x * ux + dir.y * uy);
+      if (dot < 0.85) return;
+      const dx = s.b.x - s.a.x;
+      const dy = s.b.y - s.a.y;
+      const t = ((mid.x - s.a.x) * dx + (mid.y - s.a.y) * dy) / (s.len * s.len);
+      if (t < -0.1 || t > 1.1) return;
+      const px = s.a.x + Math.max(0, Math.min(1, t)) * dx;
+      const py = s.a.y + Math.max(0, Math.min(1, t)) * dy;
+      const d = Math.hypot(mid.x - px, mid.y - py);
+      if (d <= maxDist && (!best || d < best.dist)) {
+        best = { seg: s, dist: d, t, point: { x: px, y: py } };
+      }
+    });
+    return best;
+  }
+
+  /* ------------------------------------------------------------------ */
   /* DXF Parser (Import)                                                */
   /* ------------------------------------------------------------------ */
 
@@ -488,9 +850,21 @@
       return { code, val };
     }
 
+    // Read the remaining inline tags of the current entity until the next
+    // group code 0 (the start of the following entity).
+    function readEntity(cb) {
+      while (i < rawLines.length) {
+        const peekCode = parseInt(rawLines[i].trim(), 10);
+        if (peekCode === 0) break;
+        const p = next();
+        if (p) cb(p);
+      }
+    }
+
     let inEntities = false;
     const cadLines = [];
     const cadPolylines = [];
+    const cadArcs = [];
     const cadInserts = [];
 
     while (i < rawLines.length) {
@@ -506,30 +880,21 @@
         const entityType = pair.val;
 
         if (entityType === 'LINE') {
-          let x1 = 0, y1 = 0, x2 = 0, y2 = 0;
-          let layer = '';
-          while (i < rawLines.length) {
-            const peekCode = parseInt(rawLines[i].trim(), 10);
-            if (peekCode === 0) break;
-            const p = next();
+          let x1 = 0, y1 = 0, x2 = 0, y2 = 0, layer = '';
+          readEntity((p) => {
             if (p.code === 8) layer = p.val;
             else if (p.code === 10) x1 = parseFloat(p.val) * scale;
-            else if (p.code === 20) y1 = -parseFloat(p.val) * scale; // Invert CAD Y
+            else if (p.code === 20) y1 = -parseFloat(p.val) * scale;
             else if (p.code === 11) x2 = parseFloat(p.val) * scale;
             else if (p.code === 21) y2 = -parseFloat(p.val) * scale;
-          }
-          if (Math.hypot(x2 - x1, y2 - y1) > 0.05) {
+          });
+          if (Math.hypot(x2 - x1, y2 - y1) > 0.02) {
             cadLines.push({ a: { x: x1, y: y1 }, b: { x: x2, y: y2 }, layer });
           }
         } else if (entityType === 'LWPOLYLINE') {
-          let closed = false;
+          let closed = false, layer = '', curX = null;
           const pts = [];
-          let curX = null;
-          let layer = '';
-          while (i < rawLines.length) {
-            const peekCode = parseInt(rawLines[i].trim(), 10);
-            if (peekCode === 0) break;
-            const p = next();
+          readEntity((p) => {
             if (p.code === 8) layer = p.val;
             else if (p.code === 70) closed = (parseInt(p.val, 10) & 1) !== 0;
             else if (p.code === 10) curX = parseFloat(p.val) * scale;
@@ -537,16 +902,51 @@
               pts.push({ x: curX, y: -parseFloat(p.val) * scale });
               curX = null;
             }
+          });
+          if (pts.length >= 2) cadPolylines.push({ pts, closed, layer });
+        } else if (entityType === 'POLYLINE') {
+          // Old-style R12 polyline: header, VERTEX entities, SEQEND.
+          let closed = false, layer = '';
+          readEntity((p) => {
+            if (p.code === 8) layer = p.val;
+            else if (p.code === 70) closed = (parseInt(p.val, 10) & 1) !== 0;
+          });
+          const pts = [];
+          while (i < rawLines.length) {
+            const entCode = parseInt(rawLines[i].trim(), 10);
+            if (entCode !== 0) { i++; continue; }
+            const ent = next();
+            if (!ent || ent.val !== 'VERTEX') break;
+            let vx = null, vy = null;
+            readEntity((p) => {
+              if (p.code === 10) vx = parseFloat(p.val) * scale;
+              else if (p.code === 20) vy = -parseFloat(p.val) * scale;
+            });
+            if (vx !== null && vy !== null) pts.push({ x: vx, y: vy });
+            if (i < rawLines.length) {
+              const nextCode = parseInt(rawLines[i].trim(), 10);
+              if (nextCode === 0 && rawLines[i + 1] && rawLines[i + 1].trim() === 'SEQEND') {
+                next();
+                readEntity(() => {});
+                break;
+              }
+            }
           }
-          if (pts.length >= 2) {
-            cadPolylines.push({ pts, closed, layer });
-          }
+          if (pts.length >= 2) cadPolylines.push({ pts, closed, layer });
+        } else if (entityType === 'ARC') {
+          let cx = 0, cy = 0, r = 0, a0 = 0, a1 = 0, layer = '';
+          readEntity((p) => {
+            if (p.code === 8) layer = p.val;
+            else if (p.code === 10) cx = parseFloat(p.val) * scale;
+            else if (p.code === 20) cy = -parseFloat(p.val) * scale;
+            else if (p.code === 40) r = parseFloat(p.val) * scale;
+            else if (p.code === 50) a0 = parseFloat(p.val);
+            else if (p.code === 51) a1 = parseFloat(p.val);
+          });
+          if (r > 0) cadArcs.push({ cx, cy, r, a0, a1, layer });
         } else if (entityType === 'INSERT') {
           let blockName = '', layer = '', ix = 0, iy = 0, rot = 0, scaleX = 1, scaleY = 1;
-          while (i < rawLines.length) {
-            const peekCode = parseInt(rawLines[i].trim(), 10);
-            if (peekCode === 0) break;
-            const p = next();
+          readEntity((p) => {
             if (p.code === 2) blockName = p.val;
             else if (p.code === 8) layer = p.val;
             else if (p.code === 10) ix = parseFloat(p.val) * scale;
@@ -554,7 +954,7 @@
             else if (p.code === 50) rot = parseFloat(p.val);
             else if (p.code === 41) scaleX = parseFloat(p.val);
             else if (p.code === 42) scaleY = parseFloat(p.val);
-          }
+          });
           cadInserts.push({ blockName, layer, x: ix, y: iy, rot, scaleX, scaleY });
         }
       }
@@ -564,15 +964,64 @@
       throw new Error('No compatible line or polyline entities found in CAD file.');
     }
 
-    // Outlier filtering if enabled
-    let validLines = cadLines;
-    let validPolys = cadPolylines;
-    let validInserts = cadInserts;
+    const allLayers = new Set();
+    cadLines.forEach((e) => allLayers.add(e.layer || '0'));
+    cadPolylines.forEach((e) => allLayers.add(e.layer || '0'));
+    cadArcs.forEach((e) => allLayers.add(e.layer || '0'));
+    cadInserts.forEach((e) => allLayers.add(e.layer || '0'));
+    const hasNamedWallLayers = Array.from(allLayers).some(
+      (l) => isWallLayer(l) || isExteriorLayer(l)
+    );
 
-    if (filterOutliers && (cadLines.length + cadPolylines.length) > 5) {
+    const isWallEntityLayer = (layer) => {
+      if (isWindowLayer(layer) || isDoorLayer(layer) || isIgnoredLayer(layer)) return false;
+      if (isWallLayer(layer) || isExteriorLayer(layer)) return true;
+      // Untagged geometry is only treated as a wall when the file does not
+      // provide explicit wall layers (common in very old simple DXF files).
+      return !hasNamedWallLayers;
+    };
+
+    // Layers that are not named like walls but are also not windows, doors or
+    // drafting clutter. CAD files often put real partitions on a layer with an
+    // unhelpful name ("0", "Blue idk", "A-ARCH"...), so these are kept as
+    // candidates and only promoted to walls when they pair up into a wall.
+    const isWeakWallEntityLayer = (layer) => {
+      if (!hasNamedWallLayers) return false;
+      if (isWallEntityLayer(layer)) return false;
+      if (isWindowLayer(layer) || isDoorLayer(layer) || isIgnoredLayer(layer)) return false;
+      return true;
+    };
+
+    // Raw wall geometry
+    let wallSegs = [];
+    let wallPolys = [];
+    cadLines.forEach((l) => {
+      if (isWallEntityLayer(l.layer)) wallSegs.push({ a: l.a, b: l.b, layer: l.layer, weak: false });
+      else if (isWeakWallEntityLayer(l.layer)) wallSegs.push({ a: l.a, b: l.b, layer: l.layer, weak: true });
+    });
+    cadPolylines.forEach((p) => {
+      const strong = isWallEntityLayer(p.layer);
+      const weak = strong ? false : isWeakWallEntityLayer(p.layer);
+      if (!strong && !weak) return;
+      wallPolys.push(p);
+      const count = p.pts.length - (p.closed ? 0 : 1);
+      for (let j = 0; j < count; j++) {
+        const a = p.pts[j];
+        const b = p.pts[(j + 1) % p.pts.length];
+        if (Math.hypot(b.x - a.x, b.y - a.y) > 0.02) {
+          wallSegs.push({ a, b, layer: p.layer, weak });
+        }
+      }
+    });
+
+    let windowLines = cadLines.filter((l) => isWindowLayer(l.layer));
+    let doorLines = cadLines.filter((l) => isDoorLayer(l.layer));
+    let arcs = cadArcs.filter((a) => isDoorLayer(a.layer));
+    let inserts = cadInserts.slice();
+
+    if (filterOutliers && wallSegs.length > 5) {
       const allPts = [];
-      cadLines.forEach((l) => { allPts.push(l.a); allPts.push(l.b); });
-      cadPolylines.forEach((p) => p.pts.forEach((pt) => allPts.push(pt)));
+      wallSegs.forEach((l) => { allPts.push(l.a); allPts.push(l.b); });
       const xs = allPts.map((p) => p.x).sort((a, b) => a - b);
       const ys = allPts.map((p) => p.y).sort((a, b) => a - b);
       const medX = xs[Math.floor(xs.length / 2)] || 0;
@@ -582,95 +1031,93 @@
       const iqrX = Math.max(q3X - q1X, 1);
       const iqrY = Math.max(q3Y - q1Y, 1);
 
-      function isOutlier(p) {
-        return Math.abs(p.x - medX) > iqrX * 4 || Math.abs(p.y - medY) > iqrY * 4;
-      }
+      const isOutlier = (p) =>
+        Math.abs(p.x - medX) > iqrX * 4 || Math.abs(p.y - medY) > iqrY * 4;
 
-      validLines = cadLines.filter((l) => !isOutlier(l.a) && !isOutlier(l.b));
-      validPolys = cadPolylines.filter((poly) => !poly.pts.some(isOutlier));
-      validInserts = cadInserts.filter((ins) => !isOutlier(ins));
+      wallSegs = wallSegs.filter((l) => !isOutlier(l.a) && !isOutlier(l.b));
+      wallPolys = wallPolys.filter((poly) => !poly.pts.some(isOutlier));
+      windowLines = windowLines.filter((l) => !isOutlier(l.a) && !isOutlier(l.b));
+      doorLines = doorLines.filter((l) => !isOutlier(l.a) && !isOutlier(l.b));
+      arcs = arcs.filter((a) => !isOutlier({ x: a.cx, y: a.cy }));
+      inserts = inserts.filter((ins) => !isOutlier(ins));
     }
 
-    // Convert extracted CAD entities into a new RoomCraft Plan
+    // Convert extracted CAD entities into a new RoomCraft plan
     const plan = FC.createPlan(options.filename || 'Imported CAD Floorplan');
 
-    // 1. Identify outer boundary & concentric outer wall shells
-    function isPolyLoop(p) {
-      if (!p || !p.pts || p.pts.length < 3) return false;
-      if (p.closed) return true;
-      const d = Math.hypot(p.pts[0].x - p.pts[p.pts.length - 1].x, p.pts[0].y - p.pts[p.pts.length - 1].y);
-      if (d < 2.5) return true;
-      if (/outer|exterior|perimeter|boundary|facade/i.test(p.layer) && d < 4.5) return true;
-      return false;
+    // 1. Merge double-line wall faces into centreline walls
+    const merged = mergeWallCenterlines(wallSegs, mergeDoubleLines, 0.5, options.debug);
+    if (options.debug) console.log('CAD debug raw/merged', wallSegs.length, merged.length, merged.map((w) => [w.a, w.b, w.thickness, w.exterior]));
+
+    const extSamples = merged.filter((w) => w.thickness && w.exterior).map((w) => w.thickness);
+    const intSamples = merged.filter((w) => w.thickness && !w.exterior).map((w) => w.thickness);
+    const extThickness = Math.max(0.08, Math.min(0.6, median(extSamples) || 0.2));
+    const intThickness = Math.max(0.06, Math.min(0.4, median(intSamples) || 0.12));
+    plan.settings.extThickness = FC.round(extThickness, 3);
+    plan.settings.intThickness = FC.round(intThickness, 3);
+
+    // 2. Determine the building outline.
+    // Prefer a closed (or nearly closed) wall polyline that actually covers
+    // most of the drawing. Otherwise reconstruct it from the outer wall
+    // faces. This prevents a small porch/entry polyline being mistaken for
+    // the whole house envelope.
+    function polyGap(p) {
+      if (p.closed) return 0;
+      const a = p.pts[0];
+      const b = p.pts[p.pts.length - 1];
+      return Math.hypot(a.x - b.x, a.y - b.y);
     }
 
-    const closedPolys = validPolys.filter(isPolyLoop);
-    closedPolys.sort((p1, p2) => Math.abs(FC.polygonArea(p2.pts)) - Math.abs(FC.polygonArea(p1.pts)));
+    const outerSource = wallSegs.filter((s) => isExteriorLayer(s.layer));
+    const boundsSource = outerSource.length ? outerSource : wallSegs;
+    const rawPts = [];
+    boundsSource.forEach((s) => { rawPts.push(s.a); rawPts.push(s.b); });
+    const rawBounds = rawPts.length ? FC.polygonBounds(rawPts) : null;
+    const rawBBoxArea = rawBounds ? Math.max(0.01, rawBounds.w * rawBounds.d) : 0;
 
     let bestOutline = null;
-    let extThickness = 0.2;
-    const excludedPolys = new Set();
-
-    if (closedPolys.length > 0) {
-      const p1 = closedPolys[0];
-      const area1 = Math.abs(FC.polygonArea(p1.pts));
-      if (area1 > 2) {
-        bestOutline = p1.pts;
-        excludedPolys.add(p1);
-
-        // Check if second largest closed polyline is the interior shell of the exterior wall
-        if (closedPolys.length >= 2) {
-          const p2 = closedPolys[1];
-          const area2 = Math.abs(FC.polygonArea(p2.pts));
-          if (area2 > area1 * 0.65) {
-            let distSum = 0;
-            const checkCount = Math.min(p1.pts.length, p2.pts.length);
-            for (let k = 0; k < checkCount; k++) {
-              distSum += Math.hypot(p1.pts[k].x - p2.pts[k].x, p1.pts[k].y - p2.pts[k].y);
-            }
-            const avgDist = distSum / checkCount;
-            if (avgDist > 0.05 && avgDist < 0.6) {
-              extThickness = FC.round(avgDist, 3);
-              excludedPolys.add(p2); // Exclude duplicate inner shell from interior walls
-            }
-          }
-        }
+    let bestArea = 0;
+    wallPolys.forEach((p) => {
+      if (!p.pts || p.pts.length < 3) return;
+      const gap = polyGap(p);
+      const maxGap = isExteriorLayer(p.layer) ? 1.2 : 0.5;
+      if (gap > maxGap) return;
+      const area = Math.abs(FC.polygonArea(p.pts));
+      if (area < 2) return;
+      const b = FC.polygonBounds(p.pts);
+      if (!rawBounds) return;
+      if (b.w < rawBounds.w * 0.7 || b.d < rawBounds.d * 0.7) return;
+      if (area < rawBBoxArea * 0.3) return;
+      if (area > bestArea) {
+        bestArea = area;
+        bestOutline = p.pts;
       }
-    }
-    // Exclude any remaining outer wall polyline from interior walls
-    validPolys.filter((p) => /outer|exterior|perimeter/i.test(p.layer)).forEach((p) => excludedPolys.add(p));
+    });
 
     if (bestOutline) {
       plan.outline = bestOutline.map((p) => ({ x: FC.round(p.x, 3), y: FC.round(p.y, 3) }));
-      plan.settings.extThickness = extThickness;
+      plan.settings.extThickness = FC.round(extThickness, 3);
+    } else if (rawBounds && rawBounds.w > 0.2 && rawBounds.d > 0.2) {
+      const inset = extSamples.length ? extThickness / 2 : 0;
+      const x0 = rawBounds.x0 + inset;
+      const x1 = rawBounds.x1 - inset;
+      const y0 = rawBounds.y0 + inset;
+      const y1 = rawBounds.y1 - inset;
+      if (x1 - x0 > 0.2 && y1 - y0 > 0.2) {
+        plan.outline = [
+          { x: FC.round(x0, 3), y: FC.round(y0, 3) },
+          { x: FC.round(x1, 3), y: FC.round(y0, 3) },
+          { x: FC.round(x1, 3), y: FC.round(y1, 3) },
+          { x: FC.round(x0, 3), y: FC.round(y1, 3) },
+        ];
+      }
     }
 
-    // 2. Interior Walls
-    const isWinLayer = (l) => /win|glaz|fenster/i.test(l || '');
-    const isDoorLayer = (l) => /door|tuer|porte/i.test(l || '');
-
-    const allSegs = [];
-    validLines.forEach((l) => {
-      if (!isWinLayer(l.layer) && !isDoorLayer(l.layer)) {
-        allSegs.push({ a: l.a, b: l.b });
-      }
-    });
-    validPolys.forEach((poly) => {
-      if (!excludedPolys.has(poly) && !isWinLayer(poly.layer) && !isDoorLayer(poly.layer)) {
-        for (let j = 0; j < poly.pts.length - (poly.closed ? 0 : 1); j++) {
-          const a = poly.pts[j];
-          const b = poly.pts[(j + 1) % poly.pts.length];
-          if (Math.hypot(b.x - a.x, b.y - a.y) > 0.05) {
-            allSegs.push({ a, b });
-          }
-        }
-      }
-    });
-
-    // If no outline was found from polylines, construct bounding outline
+    // Fallback for drawings that only contain free wall lines
     if (!plan.outline || plan.outline.length < 3) {
       const allPts = [];
-      allSegs.forEach((s) => { allPts.push(s.a); allPts.push(s.b); });
+      merged.forEach((s) => { allPts.push(s.a); allPts.push(s.b); });
+      if (!allPts.length) throw new Error('No usable wall geometry found in CAD file.');
       const bounds = FC.polygonBounds(allPts);
       plan.outline = [
         { x: bounds.x0, y: bounds.y0 },
@@ -680,313 +1127,215 @@
       ];
     }
 
-    // Filter segments that duplicate outline
-    const cleanSegs = [];
-    const out = plan.outline || [];
-    allSegs.forEach((s) => {
-      const len = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y);
-      if (len < 0.15) return;
+    // 3. Drop wall pieces that are the envelope itself. The outline now owns
+    // those walls, so keeping them would duplicate every exterior wall.
+    const outlineTol = Math.max(0.16, extThickness * 0.75);
+    const interiorCentre = merged.filter((w) => !segLiesOnOutline(w, plan.outline, outlineTol));
+    if (options.debug) console.log('CAD debug outline', plan.outline, 'interior', interiorCentre.length, interiorCentre.map((w) => [w.a, w.b]));
 
-      let isOutline = false;
-      for (let k = 0; k < out.length; k++) {
-        const oa = out[k];
-        const ob = out[(k + 1) % out.length];
-        const d1 = Math.hypot(oa.x - s.a.x, oa.y - s.a.y) + Math.hypot(ob.x - s.b.x, ob.y - s.b.y);
-        const d2 = Math.hypot(oa.x - s.b.x, oa.y - s.a.y) + Math.hypot(ob.x - s.a.x, ob.y - s.b.y);
-        if (d1 < 0.12 || d2 < 0.12) {
-          isOutline = true;
-          break;
-        }
-      }
-      if (!isOutline) cleanSegs.push(s);
-    });
+    // 4. Close small drafting gaps (doorways and window breaks) so rooms and
+    // openings can be recognised on continuous wall segments.
+    const interiorBridged = bridgeCollinearWalls(interiorCentre, 1.05);
+    plan.walls = interiorBridged.map((w) => ({
+      id: FC.uid('w'),
+      a: { x: FC.round(w.a.x, 3), y: FC.round(w.a.y, 3) },
+      b: { x: FC.round(w.b.x, 3), y: FC.round(w.b.y, 3) },
+    }));
 
-    // 3. Double-line wall consolidation
-    if (mergeDoubleLines) {
-      const used = new Set();
-      let detectedIntThickness = 0.12;
-
-      for (let j = 0; j < cleanSegs.length; j++) {
-        if (used.has(j)) continue;
-        const s1 = cleanSegs[j];
-        const dx1 = s1.b.x - s1.a.x, dy1 = s1.b.y - s1.a.y;
-        const len1 = Math.hypot(dx1, dy1);
-        if (len1 < 0.1) continue;
-        const ux1 = dx1 / len1, uy1 = dy1 / len1;
-        const nx1 = -uy1, ny1 = ux1;
-        const angle1 = Math.atan2(dy1, dx1);
-
-        let merged = false;
-        for (let k = j + 1; k < cleanSegs.length; k++) {
-          if (used.has(k)) continue;
-          const s2 = cleanSegs[k];
-          const dx2 = s2.b.x - s2.a.x, dy2 = s2.b.y - s2.a.y;
-          const len2 = Math.hypot(dx2, dy2);
-          if (len2 < 0.1) continue;
-          const angle2 = Math.atan2(dy2, dx2);
-
-          let diff = Math.abs(angle1 - angle2);
-          while (diff > Math.PI) diff -= Math.PI;
-          if (diff > Math.PI / 2) diff = Math.PI - diff;
-
-          if (diff < 0.14) {
-            const mid2 = { x: (s2.a.x + s2.b.x) / 2, y: (s2.a.y + s2.b.y) / 2 };
-            const perpDist = Math.abs((mid2.x - s1.a.x) * dy1 - (mid2.y - s1.a.y) * dx1) / len1;
-            if (perpDist >= 0.04 && perpDist <= 0.45) {
-              const tA = ((s2.a.x - s1.a.x) * dx1 + (s2.a.y - s1.a.y) * dy1) / (len1 * len1);
-              const tB = ((s2.b.x - s1.a.x) * dx1 + (s2.b.y - s1.a.y) * dy1) / (len1 * len1);
-              if (Math.max(tA, tB) > -0.15 && Math.min(tA, tB) < 1.15) {
-                const offset = (mid2.x - s1.a.x) * nx1 + (mid2.y - s1.a.y) * ny1;
-                const halfOffset = offset / 2;
-                const p0 = { x: s1.a.x + nx1 * halfOffset, y: s1.a.y + ny1 * halfOffset };
-                const proj = (p) => (p.x - p0.x) * ux1 + (p.y - p0.y) * uy1;
-                const tMin = Math.min(proj(s1.a), proj(s1.b), proj(s2.a), proj(s2.b));
-                const tMax = Math.max(proj(s1.a), proj(s1.b), proj(s2.a), proj(s2.b));
-
-                plan.walls.push({
-                  id: FC.uid('w'),
-                  a: { x: FC.round(p0.x + ux1 * tMin, 3), y: FC.round(p0.y + uy1 * tMin, 3) },
-                  b: { x: FC.round(p0.x + ux1 * tMax, 3), y: FC.round(p0.y + uy1 * tMax, 3) },
-                });
-                detectedIntThickness = FC.round(perpDist, 2);
-                used.add(j);
-                used.add(k);
-                merged = true;
-                break;
-              }
-            }
-          }
-        }
-        if (!merged) {
-          plan.walls.push({
-            id: FC.uid('w'),
-            a: { x: FC.round(s1.a.x, 3), y: FC.round(s1.a.y, 3) },
-            b: { x: FC.round(s1.b.x, 3), y: FC.round(s1.b.y, 3) },
-          });
-        }
-      }
-      if (detectedIntThickness >= 0.05 && detectedIntThickness <= 0.35) {
-        plan.settings.intThickness = detectedIntThickness;
-      }
-    } else {
-      cleanSegs.forEach((s) => {
-        plan.walls.push({
-          id: FC.uid('w'),
-          a: { x: FC.round(s.a.x, 3), y: FC.round(s.a.y, 3) },
-          b: { x: FC.round(s.b.x, 3), y: FC.round(s.b.y, 3) },
-        });
-      });
+    // 5. Heal junctions now, before openings are attached to walls
+    if (FC.healWallJunctions) {
+      FC.healWallJunctions(plan);
+    } else if (FC.closeWallGaps) {
+      FC.closeWallGaps(plan, 0.28);
     }
+    plan.walls = plan.walls.filter((w) => Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) > 0.05);
 
-    // 4. Doors & Windows from CAD INSERTS and Layer Lines
+    // 6. Doors & windows
     if (importDoors) {
       const bOutline = FC.polygonBounds(plan.outline);
-      const bMargin = 2.5;
+      const bMargin = 0.85;
       const inBuildingBounds = (p) =>
         p.x >= bOutline.x0 - bMargin &&
         p.x <= bOutline.x1 + bMargin &&
         p.y >= bOutline.y0 - bMargin &&
         p.y <= bOutline.y1 + bMargin;
 
-      const inBoundsInserts = validInserts.filter(inBuildingBounds);
       const segs = FC.getSegments(plan);
+      const maxHostDist = Math.max(0.55, extThickness * 2.2);
+      // Window symbols are often drawn as a box sitting inside the room next
+      // to the wall they belong to, so they get a wider attachment radius than
+      // door blocks, which are placed on the wall itself.
+      const maxWindowDist = Math.max(1.6, extThickness * 6);
 
+      const addOpening = (op) => {
+        const existing = plan.openings.find(
+          (o) => o.hostKey === op.hostKey &&
+            Math.abs(o.offset - op.offset) < Math.max(0.22, Math.min(o.width, op.width) * 0.6)
+        );
+        if (existing) {
+          if (op.width > existing.width) {
+            existing.width = op.width;
+            existing.offset = op.offset;
+          }
+          return;
+        }
+        plan.openings.push(op);
+      };
+
+      // Windows are drawn as parallel line pairs (and often a glazing line)
+      // on a Windows layer. Take the longest line of each group so the true
+      // opening width wins over the inner glazing line.
+      const winCandidates = windowLines
+        .filter((l) => inBuildingBounds(l.a) && inBuildingBounds(l.b))
+        .map((l) => ({ l, len: Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y) }))
+        .filter((x) => x.len >= 0.5 && x.len <= 3.2)
+        .sort((a, b) => b.len - a.len);
+
+      winCandidates.forEach(({ l, len }) => {
+        const dir = { x: (l.b.x - l.a.x) / len, y: (l.b.y - l.a.y) / len };
+        const mid = { x: (l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2 };
+        const host = findHostSegment(segs, mid, dir, maxWindowDist);
+        if (options.debug) console.log('WIN', len.toFixed(2), [mid.x.toFixed(2), mid.y.toFixed(2)], 'dir', dir, host ? 'host ' + host.seg.key + ' d=' + host.dist.toFixed(2) : 'NO HOST');
+        if (!host) return;
+        const width = Math.min(len, host.seg.len - 0.08);
+        if (width < 0.5) return;
+        const offset = Math.max(width / 2 + 0.01, Math.min(host.seg.len - width / 2 - 0.01, host.t * host.seg.len));
+        addOpening({
+          id: FC.uid('op'),
+          kind: 'window',
+          style: 'standard',
+          hostKey: host.seg.key,
+          offset: FC.round(offset, 3),
+          width: FC.round(width, 3),
+          height: plan.settings.windowHeight || 1.2,
+          sill: plan.settings.windowSill || 0.9,
+          hinge: 'left',
+          swingSide: 1,
+        });
+      });
+
+      // Doors are usually arcs (hinge = arc centre, radius = leaf width).
+      // The arc has two radii: one is the closed door along the wall, the
+      // other is the open leaf. Pick the radius whose midpoint lands on a
+      // wall segment parallel to it.
+      arcs.forEach((arc) => {
+        if (options.debug) console.log('ARC', arc.r.toFixed(2), [arc.cx.toFixed(2), arc.cy.toFixed(2)], arc.a0, arc.a1);
+        if (arc.r < 0.4 || arc.r > 1.5) return;
+        if (!inBuildingBounds({ x: arc.cx, y: arc.cy })) return;
+        const dirs = [
+          { x: Math.cos((arc.a0 * Math.PI) / 180), y: -Math.sin((arc.a0 * Math.PI) / 180) },
+          { x: Math.cos((arc.a1 * Math.PI) / 180), y: -Math.sin((arc.a1 * Math.PI) / 180) },
+        ];
+
+        let best = null;
+        dirs.forEach((dir, idx) => {
+          const mid = { x: arc.cx + dir.x * arc.r / 2, y: arc.cy + dir.y * arc.r / 2 };
+          if (!inBuildingBounds(mid)) return;
+          const host = findHostSegment(segs, mid, dir, 0.55);
+          if (!host) return;
+          const ux = Math.cos(host.seg.angle);
+          const uy = Math.sin(host.seg.angle);
+          const hingeDist = Math.abs((arc.cx - host.seg.a.x) * uy - (arc.cy - host.seg.a.y) * ux);
+          if (hingeDist > 0.45) return;
+          const score = host.dist + hingeDist;
+          if (!best || score < best.score) best = { host, dir, idx, score };
+        });
+        if (!best) return;
+
+        const host = best.host;
+        const width = Math.min(arc.r, host.seg.len - 0.08);
+        if (width < 0.45) return;
+        const offset = Math.max(width / 2 + 0.01, Math.min(host.seg.len - width / 2 - 0.01, host.t * host.seg.len));
+
+        // Which end of the opening is the hinge?
+        const ux = Math.cos(host.seg.angle);
+        const uy = Math.sin(host.seg.angle);
+        const hingeParam = ((arc.cx - host.seg.a.x) * ux + (arc.cy - host.seg.a.y) * uy);
+        const hinge = hingeParam < offset ? 'left' : 'right';
+
+        // Swing side: the other arc radius points to the open leaf.
+        const other = dirs[best.idx === 0 ? 1 : 0];
+        const nx = -Math.sin(host.seg.angle);
+        const ny = Math.cos(host.seg.angle);
+        const swingSide = other.x * nx + other.y * ny >= 0 ? 1 : -1;
+
+        addOpening({
+          id: FC.uid('op'),
+          kind: 'door',
+          style: 'single',
+          hostKey: host.seg.key,
+          offset: FC.round(offset, 3),
+          width: FC.round(width, 3),
+          height: plan.settings.doorHeight || 2.1,
+          sill: 0,
+          hinge,
+          swingSide,
+        });
+      });
+
+      // Door/window blocks (INSERT entities) from CAD libraries
+      const inBoundsInserts = inserts.filter(inBuildingBounds);
       inBoundsInserts.forEach((ins) => {
         const isSliding = /sliding|pocket|bypass/i.test(ins.blockName) || /sliding|pocket|bypass/i.test(ins.layer);
         const isBifold = /bifold|folding/i.test(ins.blockName) || /bifold|folding/i.test(ins.layer);
         const isDouble = /double/i.test(ins.blockName);
         const isDoor = isSliding || isBifold || isDouble || /door/i.test(ins.blockName) || isDoorLayer(ins.layer);
-        const isWindow = /window|win|glaz/i.test(ins.blockName) || isWinLayer(ins.layer);
+        const isWindow = /window|win|glaz/i.test(ins.blockName) || isWindowLayer(ins.layer);
         if (!isDoor && !isWindow) return;
 
-        let w = isDoor ? (plan.settings.doorWidth || 0.9) : (plan.settings.windowWidth || 1.2);
-        if (/6FT/i.test(ins.blockName)) w = 1.829;
-        else if (/5FT/i.test(ins.blockName)) w = 1.524;
-        else if (/4FT/i.test(ins.blockName)) w = 1.219;
-        else if (/3FT/i.test(ins.blockName)) w = 0.914;
-        else if (/2FT8/i.test(ins.blockName)) w = 0.813;
-        else if (/2FT6/i.test(ins.blockName)) w = 0.762;
-        else if (/2FT/i.test(ins.blockName)) w = 0.610;
-        else if (/1FT/i.test(ins.blockName)) w = 0.305;
+        let width = isDoor ? (plan.settings.doorWidth || 0.9) : (plan.settings.windowWidth || 1.2);
+        if (/6FT/i.test(ins.blockName)) width = 1.829;
+        else if (/5FT/i.test(ins.blockName)) width = 1.524;
+        else if (/4FT/i.test(ins.blockName)) width = 1.219;
+        else if (/3FT/i.test(ins.blockName)) width = 0.914;
+        else if (/2FT8/i.test(ins.blockName)) width = 0.813;
+        else if (/2FT6/i.test(ins.blockName)) width = 0.762;
+        else if (/2FT/i.test(ins.blockName)) width = 0.610;
+        else if (/1FT/i.test(ins.blockName)) width = 0.305;
 
-        const theta = (((ins.rot || 0) * Math.PI) / 180);
-        const cos = Math.cos(theta);
-        const sin = Math.sin(theta);
-        const sX = ins.scaleX ?? 1;
-        const sY = ins.scaleY ?? 1;
-
-        // In CAD door blocks, insertion point (ins.x, ins.y) is the hinge on one jamb.
-        // The threshold runs along local X by (w * sX).
-        // Rotated by theta (CAD Y up -> RoomCraft Y inverted):
-        const th_dx = w * sX * cos;
-        const th_dy = -(w * sX * sin);
-        const doorW = Math.hypot(th_dx, th_dy) || w;
-        const th_ux = th_dx / doorW;
-        const th_uy = th_dy / doorW;
-
-        // Leaf direction in RoomCraft coordinates:
-        const leaf_dx = -w * sY * sin;
-        const leaf_dy = -w * sY * cos;
-
-        // True center of the opening:
-        const cx = isDoor ? (ins.x + th_dx / 2) : ins.x;
-        const cy = isDoor ? (ins.y + th_dy / 2) : ins.y;
-
-        let bestSeg = null;
-        let bestDist = Infinity;
-        let bestOffset = 0;
-        let bestHinge = 'left';
-        let bestSwing = 1;
-
-        segs.forEach((s) => {
-          const s_dx = s.b.x - s.a.x, s_dy = s.b.y - s.a.y;
-          const len = s.len;
-          if (len < 0.2) return;
-          const s_ux = s_dx / len;
-          const s_uy = s_dy / len;
-          const s_nx = -s_uy;
-          const s_ny = s_ux;
-
-          // For doors, ensure host segment is parallel to threshold direction
-          if (isDoor) {
-            const dotAlign = Math.abs(th_ux * s_ux + th_uy * s_uy);
-            if (dotAlign < 0.70) return;
+        const theta = ((ins.rot || 0) * Math.PI) / 180;
+        let dir = { x: Math.cos(theta), y: -Math.sin(theta) };
+        let centre = isDoor
+          ? { x: ins.x + dir.x * width / 2, y: ins.y + dir.y * width / 2 }
+          : { x: ins.x, y: ins.y };
+        let host = findHostSegment(segs, centre, dir, maxHostDist);
+        // Door blocks are drawn along their local X axis, and CAD users rotate
+        // them 0/90/180/270. The stored angle is not always the wall direction,
+        // so fall back to the perpendicular axis before giving up.
+        if (!host && isDoor) {
+          const alt = { x: -dir.y, y: dir.x };
+          const altCentre = { x: ins.x + alt.x * width / 2, y: ins.y + alt.y * width / 2 };
+          const altHost = findHostSegment(segs, altCentre, alt, maxHostDist);
+          if (altHost) {
+            dir = alt;
+            centre = altCentre;
+            host = altHost;
           }
-
-          const t = ((cx - s.a.x) * s_dx + (cy - s.a.y) * s_dy) / (len * len);
-          if (t >= -0.20 && t <= 1.20) {
-            const px = s.a.x + Math.max(0, Math.min(1, t)) * s_dx;
-            const py = s.a.y + Math.max(0, Math.min(1, t)) * s_dy;
-            const d = Math.hypot(cx - px, cy - py);
-            if (d < bestDist) {
-              bestDist = d;
-              bestSeg = s;
-              bestOffset = Math.max(doorW / 2 + 0.04, Math.min(len - doorW / 2 - 0.04, t * len));
-
-              // Determine hinge side along segment direction
-              const hingeVec = (ins.x - cx) * s_ux + (ins.y - cy) * s_uy;
-              bestHinge = hingeVec > 0 ? 'right' : 'left';
-
-              // Determine swing direction relative to segment normal (+n vs -n)
-              const swingDot = leaf_dx * s_nx + leaf_dy * s_ny;
-              bestSwing = swingDot >= 0 ? 1 : -1;
-            }
-          }
+        }
+        if (options.debug) console.log('INS', ins.blockName, ins.layer, [ins.x.toFixed(2), ins.y.toFixed(2)], 'rot', ins.rot, host ? 'host ' + host.seg.key : 'NO HOST');
+        if (!host) return;
+        const w = Math.min(width, host.seg.len - 0.08);
+        if (w < 0.3) return;
+        const offset = Math.max(w / 2 + 0.01, Math.min(host.seg.len - w / 2 - 0.01, host.t * host.seg.len));
+        const leaf = { x: -Math.sin(theta), y: -Math.cos(theta) };
+        const nx = -Math.sin(host.seg.angle);
+        const ny = Math.cos(host.seg.angle);
+        addOpening({
+          id: FC.uid('op'),
+          kind: isDoor ? 'door' : 'window',
+          style: isDoor ? (isSliding ? 'sliding' : (isBifold ? 'bifold' : (isDouble ? 'double' : 'single'))) : 'standard',
+          hostKey: host.seg.key,
+          offset: FC.round(offset, 3),
+          width: FC.round(w, 3),
+          height: isDoor ? (plan.settings.doorHeight || 2.1) : (plan.settings.windowHeight || 1.2),
+          sill: isDoor ? 0 : (plan.settings.windowSill || 0.9),
+          hinge: isDoor ? (ins.x < centre.x + 0.01 ? 'left' : 'right') : 'left',
+          swingSide: isDoor ? (leaf.x * nx + leaf.y * ny >= 0 ? 1 : -1) : 1,
         });
-
-        if (bestSeg && bestDist < 1.4) {
-          // Check for duplicate / overlap with existing opening on this wall
-          const existing = plan.openings.find(
-            (o) => o.hostKey === bestSeg.key && Math.abs(o.offset - bestOffset) < (o.width + doorW) / 2 - 0.05
-          );
-          if (!existing) {
-            plan.openings.push({
-              id: FC.uid('op'),
-              kind: isDoor ? 'door' : 'window',
-              style: isDoor ? (isSliding ? 'sliding' : (isBifold ? 'bifold' : (isDouble ? 'double' : 'single'))) : 'standard',
-              hostKey: bestSeg.key,
-              offset: FC.round(bestOffset, 3),
-              width: FC.round(doorW, 3),
-              height: isDoor ? (plan.settings.doorHeight || 2.1) : (plan.settings.windowHeight || 1.2),
-              sill: isDoor ? 0 : (plan.settings.windowSill || 0.9),
-              hinge: isDoor ? bestHinge : 'left',
-              swingSide: isDoor ? bestSwing : 1,
-            });
-          }
-        }
-      });
-
-      // Detect bifold door lines on Doors layer (e.g. closet opening header and triangles)
-      const doorLineCandidates = validLines.filter((l) => isDoorLayer(l.layer) && inBuildingBounds(l.a) && inBuildingBounds(l.b));
-      doorLineCandidates.forEach((dl) => {
-        const len = Math.hypot(dl.b.x - dl.a.x, dl.b.y - dl.a.y);
-        if (len >= 1.1 && len <= 2.4) {
-          const midX = (dl.a.x + dl.b.x) / 2;
-          const midY = (dl.a.y + dl.b.y) / 2;
-          let bestSeg = null, bestDist = Infinity, bestOffset = 0;
-          segs.forEach((s) => {
-            const dx = s.b.x - s.a.x, dy = s.b.y - s.a.y;
-            const t = ((midX - s.a.x) * dx + (midY - s.a.y) * dy) / (s.len * s.len);
-            if (t >= -0.05 && t <= 1.05) {
-              const px = s.a.x + Math.max(0, Math.min(1, t)) * dx;
-              const py = s.a.y + Math.max(0, Math.min(1, t)) * dy;
-              const d = Math.hypot(midX - px, midY - py);
-              if (d < bestDist) {
-                bestDist = d;
-                bestSeg = s;
-                bestOffset = Math.max(len / 2 + 0.05, Math.min(s.len - len / 2 - 0.05, t * s.len));
-              }
-            }
-          });
-          if (bestSeg && bestDist < 0.6) {
-            const dup = plan.openings.find((o) => o.hostKey === bestSeg.key && Math.abs(o.offset - bestOffset) < (o.width + len) / 2);
-            if (!dup) {
-              plan.openings.push({
-                id: FC.uid('op'),
-                kind: 'door',
-                style: 'bifold',
-                hostKey: bestSeg.key,
-                offset: FC.round(bestOffset, 3),
-                width: FC.round(len, 3),
-                height: plan.settings.doorHeight || 2.1,
-                sill: 0,
-                hinge: 'left',
-                swingSide: 1,
-              });
-            }
-          }
-        }
-      });
-
-      // Convert window drafting lines on Windows layer into window openings
-      const winLineCandidates = validLines.filter((l) => isWinLayer(l.layer) && inBuildingBounds(l.a) && inBuildingBounds(l.b));
-      winLineCandidates.forEach((wl) => {
-        const len = Math.hypot(wl.b.x - wl.a.x, wl.b.y - wl.a.y);
-        if (len >= 0.55 && len <= 3.2) {
-          const midX = (wl.a.x + wl.b.x) / 2;
-          const midY = (wl.a.y + wl.b.y) / 2;
-          let bestSeg = null, bestDist = Infinity, bestOffset = 0;
-          segs.forEach((s) => {
-            const dx = s.b.x - s.a.x, dy = s.b.y - s.a.y;
-            const t = ((midX - s.a.x) * dx + (midY - s.a.y) * dy) / (s.len * s.len);
-            if (t >= -0.05 && t <= 1.05) {
-              const px = s.a.x + Math.max(0, Math.min(1, t)) * dx;
-              const py = s.a.y + Math.max(0, Math.min(1, t)) * dy;
-              const d = Math.hypot(midX - px, midY - py);
-              if (d < bestDist) {
-                bestDist = d;
-                bestSeg = s;
-                bestOffset = Math.max(len / 2 + 0.05, Math.min(s.len - len / 2 - 0.05, t * s.len));
-              }
-            }
-          });
-          if (bestSeg && bestDist < 0.5) {
-            const dup = plan.openings.find((o) => o.hostKey === bestSeg.key && Math.abs(o.offset - bestOffset) < 0.4);
-            if (!dup) {
-              plan.openings.push({
-                id: FC.uid('op'),
-                kind: 'window',
-                style: 'standard',
-                hostKey: bestSeg.key,
-                offset: FC.round(bestOffset, 3),
-                width: FC.round(len, 3),
-                height: plan.settings.windowHeight || 1.2,
-                sill: plan.settings.windowSill || 0.9,
-              });
-            }
-          }
-        }
       });
     }
 
-    // 5. Heal wall junctions (CAD double line gaps, exterior wall thickness offset, double dots)
-    if (FC.healWallJunctions) {
-      FC.healWallJunctions(plan);
-    } else if (FC.closeWallGaps) {
-      FC.closeWallGaps(plan, 0.28);
-    }
-
-    // 6. Normalize coordinates so min coordinates are nicely centered near origin
+    // 7. Normalize coordinates so the plan starts near the origin
     const b = FC.planBounds(plan);
     const shiftX = -b.x0 + 1.0;
     const shiftY = -b.y0 + 1.0;
@@ -1001,7 +1350,7 @@
       FC.ensureOpeningHosts(plan);
     }
 
-    // 7. Auto-detect rooms now that walls and outline are cleanly sealed
+    // 8. Auto-detect rooms now that walls and outline are cleanly sealed
     if (FC.detectRooms) {
       plan.rooms = FC.detectRooms(plan);
     }
@@ -1009,3 +1358,5 @@
     return plan;
   };
 })();
+
+
