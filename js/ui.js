@@ -204,7 +204,8 @@
             ? `data-action="${t.action}" data-step="${t.step}"`
             : `data-action="${t.action}"`
           : `data-action="tool" data-tool="${t.tool}"`;
-        return `<button class="rail-btn ${active ? 'active' : ''}" ${attrs} data-tip="${t.label}${t.key ? ' <em>(' + t.key + ')</em>' : ''}" aria-label="${t.label}">
+        const tip = t.key ? `${t.label} (${t.key})` : t.label;
+        return `<button class="rail-btn ${active ? 'active' : ''}" ${attrs} data-tip="${esc(tip)}" aria-label="${esc(t.label)}">
           ${I(t.icon)}
         </button>`;
       }).join('');
@@ -1910,9 +1911,9 @@
         { id: 'bedroom', label: 'Bedroom' },
         { id: 'kitchen', label: 'Kitchen' },
         { id: 'dining', label: 'Dining' },
-        { id: 'bath', label: 'Bath' },
+        { id: 'bathroom', label: 'Bath' },
         { id: 'office', label: 'Office' },
-        { id: 'laundry', label: 'Laundry' },
+        { id: 'utility', label: 'Laundry' },
         { id: 'garage', label: 'Garage' },
         { id: 'outdoor', label: 'Outdoor' },
       ];
@@ -1923,9 +1924,9 @@
         else if (room.type === 'bedroom') activeCategory = 'bedroom';
         else if (room.type === 'kitchen') activeCategory = 'kitchen';
         else if (room.type === 'dining') activeCategory = 'dining';
-        else if (room.type === 'bath') activeCategory = 'bath';
+        else if (room.type === 'bathroom') activeCategory = 'bathroom';
         else if (room.type === 'office') activeCategory = 'office';
-        else if (room.type === 'utility') activeCategory = 'laundry';
+        else if (room.type === 'utility') activeCategory = 'utility';
         else if (room.type === 'garage') activeCategory = 'garage';
         else if (room.type === 'patio' || room.type === 'balcony') activeCategory = 'outdoor';
       }
@@ -2024,7 +2025,7 @@
           ${opts.html || (opts.message ? `<p class="modal-message">${esc(opts.message)}</p>` : '')}
           <div class="modal-actions">
             ${(opts.actions || [{ label: 'Close', value: null }])
-              .map((a, i) => `<button class="btn ${a.primary ? 'primary' : 'soft'}" data-i="${i}">${esc(a.label)}</button>`)
+              .map((a, i) => `<button class="btn ${a.primary ? 'primary' : 'soft'}${a.danger ? ' danger' : ''}" data-i="${i}">${esc(a.label)}</button>`)
               .join('')}
           </div>
         </div>`;
@@ -2082,7 +2083,7 @@
         eyebrow: 'Please confirm',
         actions: [
           { label: (opts && opts.cancelLabel) || 'Cancel', value: false },
-          { label: (opts && opts.okLabel) || 'Continue', primary: true, value: true },
+          { label: (opts && opts.okLabel) || 'Continue', primary: true, danger: !!(opts && opts.danger), value: true },
         ],
       });
       return !!r;
@@ -2124,8 +2125,9 @@
     /* ---------------------------------------------------------------- */
 
     toast(message, type) {
+      const kind = type === 'warning' ? 'warn' : type || 'info';
       const el = document.createElement('div');
-      el.className = 'toast ' + (type || 'info');
+      el.className = 'toast ' + kind;
       const icon = type === 'error' ? 'info' : type === 'success' ? 'check' : type === 'warn' ? 'info' : 'info';
       el.innerHTML = `<span class="toast-ico">${I(icon)}</span><span>${esc(message)}</span>`;
       this.els.toasts.appendChild(el);
