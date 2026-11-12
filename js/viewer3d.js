@@ -585,14 +585,16 @@
           gL1.name = 'Bifold_Hinge_Left_Inner';
           gL1.userData = { partName: 'Bifold_Hinge_Left_Inner' };
           gL1.position.set(-w / 2 + 0.04, 0, 0);
-          gL1.rotation.y = fold * swingSign;
+          // Local +Z is the wall normal used by the 2D plan, so folding toward the
+          // plan's swing side requires a negative Y rotation for +X-pointing leaves.
+          gL1.rotation.y = -fold * swingSign;
           addPartMesh(gL1, new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat, leafW / 2, leafH / 2 + 0.02, 0, 'Bifold_Leaf_Left_1');
 
           const gL2 = new THREE.Group();
           gL2.name = 'Bifold_Hinge_Left_Outer';
           gL2.userData = { partName: 'Bifold_Hinge_Left_Outer' };
           gL2.position.set(leafW, 0, 0);
-          gL2.rotation.y = -fold * 2 * swingSign;
+          gL2.rotation.y = fold * 2 * swingSign;
           addPartMesh(gL2, new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat, leafW / 2, leafH / 2 + 0.02, 0, 'Bifold_Leaf_Left_2');
           addPartMesh(gL2, new THREE.CylinderGeometry(0.012, 0.012, 0.16, 8), trimMat, leafW - 0.04, 1.05, 0.028 * swingSign, 'Bifold_Handle_Left');
           gL1.add(gL2);
@@ -602,14 +604,14 @@
           gR1.name = 'Bifold_Hinge_Right_Inner';
           gR1.userData = { partName: 'Bifold_Hinge_Right_Inner' };
           gR1.position.set(w / 2 - 0.04, 0, 0);
-          gR1.rotation.y = -fold * swingSign;
+          gR1.rotation.y = fold * swingSign;
           addPartMesh(gR1, new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat, -leafW / 2, leafH / 2 + 0.02, 0, 'Bifold_Leaf_Right_1');
 
           const gR2 = new THREE.Group();
           gR2.name = 'Bifold_Hinge_Right_Outer';
           gR2.userData = { partName: 'Bifold_Hinge_Right_Outer' };
           gR2.position.set(-leafW, 0, 0);
-          gR2.rotation.y = fold * 2 * swingSign;
+          gR2.rotation.y = -fold * 2 * swingSign;
           addPartMesh(gR2, new THREE.BoxGeometry(leafW, leafH, 0.036), woodMat, -leafW / 2, leafH / 2 + 0.02, 0, 'Bifold_Leaf_Right_2');
           addPartMesh(gR2, new THREE.CylinderGeometry(0.012, 0.012, 0.16, 8), trimMat, -leafW + 0.04, 1.05, 0.028 * swingSign, 'Bifold_Handle_Right');
           gR1.add(gR2);
@@ -631,7 +633,7 @@
             hinge.name = `Door_Hinge${leafTag}`;
             hinge.userData = { partName: `Door_Hinge${leafTag}` };
             hinge.position.set(hingeX, 0, 0);
-            hinge.rotation.y = side * swingSign * 0.82;
+            hinge.rotation.y = -side * swingSign * 0.82;
             addPartMesh(hinge, new THREE.BoxGeometry(leafW, leafH, 0.042), woodMat, (side > 0 ? 1 : -1) * leafW / 2, leafH / 2 + 0.02, 0, `Door_Leaf${leafTag}`);
             addPartMesh(hinge, new THREE.BoxGeometry(leafW - 0.14, leafH - 0.28, 0.008), insetMat, (side > 0 ? 1 : -1) * leafW / 2, leafH / 2 + 0.02, 0.024 * swingSign, `Door_Panel_Inset${leafTag}`);
             addPartMesh(hinge, new THREE.SphereGeometry(0.035, 10, 8), trimMat, (side > 0 ? 1 : -1) * (leafW - 0.1), 1.02, 0.05 * swingSign, `Door_Knob${leafTag}`);
